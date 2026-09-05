@@ -7,7 +7,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.cv_parser import parse_cv
+from app.cv_parser import CVParseError, parse_cv
 from app.db import get_db
 from app.models import Profile, User
 
@@ -57,12 +57,17 @@ async def submit_intake(
     )
 
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-    structured = parse_cv(
-        cv_text=cv_text,
-        questionnaire_answers=questionnaire_answers,
-        client=client,
-        model=settings.claude_model,
-    )
+    try:
+        structured = parse_cv(
+            cv_text=cv_text,
+            questionnaire_answers=questionnaire_answers,
+            client=client,
+            model=settings.claude_model,
+        )
+    except CVParseError:
+        raise HTTPException(
+            status_code=502, detail="Could not process your CV. Please try again."
+        )
 
     user = get_or_create_default_user(db)
     profile = db.query(Profile).filter_by(user_id=user.id).first()
