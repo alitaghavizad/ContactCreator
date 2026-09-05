@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import anthropic
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -7,10 +7,11 @@ from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
+from app.business_days import business_days_from
 from app.config import settings
 from app.db import get_db
 from app.drafting import DraftingError, draft_email, draft_linkedin_note
-from app.models import Contact, OutreachChannel, OutreachMessage, OutreachStatus, User
+from app.models import Contact, Event, OutreachChannel, OutreachMessage, OutreachStatus, User
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
@@ -23,6 +24,10 @@ def _profile_summary(profile) -> str:
         f"{profile.years_experience} years of experience. "
         f"Skills: {skills}. Domain expertise: {domains}. Seniority: {profile.seniority}."
     )
+
+
+def _log_event(db: Session, contact_id: int, event_type: str, note: str) -> None:
+    db.add(Event(contact_id=contact_id, type=event_type, note=note, timestamp=datetime.utcnow()))
 
 
 @router.post("/outreach/generate/{contact_id}")
@@ -97,9 +102,16 @@ def mark_sent(message_id: int, db: Session = Depends(get_db)):
     if message is None:
         raise HTTPException(status_code=404, detail="Message not found")
 
+    old_status = message.status
     message.status = OutreachStatus.sent
     message.sent_at = datetime.utcnow()
-    message.follow_up_due_at = datetime.utcnow() + timedelta(days=6)
+    follow_up_date = business_days_from(
+        message.sent_at.date(), settings.follow_up_business_days
+    )
+    message.follow_up_due_at = datetime.combine(follow_up_date, message.sent_at.time())
+    _log_event(
+        db, message.contact_id, OutreachStatus.sent.value, f"{old_status.value} -> sent"
+    )
     db.commit()
 
     # Browser form post: send the user back to the review queue.

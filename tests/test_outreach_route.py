@@ -111,8 +111,10 @@ def test_generate_drafts_404_for_unknown_contact(client):
 
 @patch("app.routes.outreach.anthropic.Anthropic")
 def test_mark_sent_updates_status_and_follow_up(mock_anthropic_cls, client):
+    from app.business_days import business_days_from
+    from app.config import settings
     from app.db import SessionLocal
-    from app.models import OutreachMessage
+    from app.models import Event, OutreachMessage
 
     db = SessionLocal()
     contact = _create_contact(db)
@@ -137,7 +139,13 @@ def test_mark_sent_updates_status_and_follow_up(mock_anthropic_cls, client):
     assert message.status == OutreachStatus.sent
     assert message.sent_at is not None
     assert message.follow_up_due_at is not None
-    assert (message.follow_up_due_at - message.sent_at).days == 6
+    expected_date = business_days_from(message.sent_at.date(), settings.follow_up_business_days)
+    assert message.follow_up_due_at.date() == expected_date
+
+    events = db.query(Event).filter_by(contact_id=contact_id).all()
+    assert len(events) == 1
+    assert events[0].type == "sent"
+    assert events[0].note == "drafted -> sent"
     db.close()
 
     # The sent message drops out of the review queue.
