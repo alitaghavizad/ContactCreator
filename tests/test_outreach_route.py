@@ -868,6 +868,88 @@ def test_outreach_page_shows_failed_sends_with_error_and_retry(mock_smtp_cls, cl
     assert f'action="/outreach/{message_id}/send-email"' in section
 
 
+@patch("app.routes.outreach.SMTPEmailClient")
+def test_send_email_429_detail_includes_reset_date(mock_smtp_cls, client):
+    from datetime import date, timedelta
+
+    from app.config import settings
+    from app.models import EmailSendUsage
+
+    period_start = date.today()
+    db = SessionLocal()
+    contact = _create_contact(db)
+    contact_id = contact.id
+    db.add(EmailSendUsage(used=settings.daily_email_send_limit, period_start=period_start))
+    db.commit()
+    db.close()
+    _generate_drafts_for(client, contact_id)
+    message_id = _email_message_id(contact_id)
+
+    response = client.post(f"/outreach/{message_id}/send-email", follow_redirects=False)
+
+    assert response.status_code == 429
+    detail = response.json()["detail"]
+    # The user is told when the daily allowance comes back.
+    assert str(period_start + timedelta(days=1)) in detail
+    mock_smtp_cls.assert_not_called()
+
+
+def test_outreach_page_resets_and_persists_stale_email_usage(client):
+    """GET /outreach must roll the daily period over itself, not wait for a send."""
+    from datetime import date, timedelta
+
+    from app.config import settings
+    from app.models import EmailSendUsage
+
+    db = SessionLocal()
+    # A fully-spent day that ended two days ago.
+    db.add(
+        EmailSendUsage(
+            used=settings.daily_email_send_limit,
+            period_start=date.today() - timedelta(days=2),
+        )
+    )
+    db.commit()
+    db.close()
+
+    response = client.get("/outreach")
+
+    assert response.status_code == 200
+    limit = settings.daily_email_send_limit
+    assert f"Emails sent today: 0 / {limit}" in response.text
+
+    # The rollover is persisted, not just displayed.
+    db = SessionLocal()
+    usage = db.query(EmailSendUsage).first()
+    assert usage.used == 0
+    assert usage.period_start == date.today()
+    db.close()
+
+
+def test_outreach_page_does_not_reset_current_email_usage(client):
+    """Guard against the rollover resetting a day that is still current."""
+    from datetime import date
+
+    from app.config import settings
+    from app.models import EmailSendUsage
+
+    db = SessionLocal()
+    db.add(EmailSendUsage(used=5, period_start=date.today()))
+    db.commit()
+    db.close()
+
+    response = client.get("/outreach")
+
+    limit = settings.daily_email_send_limit
+    assert f"Emails sent today: 5 / {limit}" in response.text
+
+    db = SessionLocal()
+    usage = db.query(EmailSendUsage).first()
+    assert usage.used == 5
+    assert usage.period_start == date.today()
+    db.close()
+
+
 def test_outreach_page_shows_daily_email_counter(client):
     from app.config import settings
 
