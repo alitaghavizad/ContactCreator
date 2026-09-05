@@ -45,6 +45,14 @@ def _create_contact(db):
     return contact
 
 
+def _section(html: str, heading: str) -> str:
+    """Return the rendered outreach.html block under `<h2>{heading}</h2>`, up to the next <h2>."""
+    marker = f"<h2>{heading}</h2>"
+    assert marker in html, f"heading {heading!r} not found in page"
+    body = html.split(marker, 1)[1]
+    return body.split("<h2>", 1)[0]
+
+
 def _mock_anthropic_returning(text: str):
     mock_client = MagicMock()
     mock_content_block = MagicMock()
@@ -151,6 +159,156 @@ def test_mark_sent_updates_status_and_follow_up(mock_anthropic_cls, client):
     # The sent message drops out of the review queue.
     queue = client.get("/outreach")
     assert f"/outreach/{message_id}/mark-sent" not in queue.text
+
+
+@patch("app.routes.outreach.anthropic.Anthropic")
+def test_mark_sent_rejects_already_sent_message(mock_anthropic_cls, client):
+    from app.db import SessionLocal
+    from app.models import Event, OutreachMessage
+
+    db = SessionLocal()
+    contact = _create_contact(db)
+    contact_id = contact.id
+    db.close()
+
+    mock_anthropic_cls.return_value = _mock_anthropic_returning("Hi Jane, ...")
+    client.post(f"/outreach/generate/{contact_id}", follow_redirects=False)
+
+    db = SessionLocal()
+    message = db.query(OutreachMessage).filter_by(contact_id=contact_id).first()
+    message_id = message.id
+    db.close()
+
+    first = client.post(f"/outreach/{message_id}/mark-sent", follow_redirects=False)
+    assert first.status_code == 303
+
+    db = SessionLocal()
+    after_first = db.query(OutreachMessage).filter_by(id=message_id).first()
+    sent_at = after_first.sent_at
+    follow_up_due_at = after_first.follow_up_due_at
+    db.close()
+
+    # A double-click / back-button resubmit must not re-run the body.
+    second = client.post(f"/outreach/{message_id}/mark-sent", follow_redirects=False)
+    assert second.status_code == 400
+
+    db = SessionLocal()
+    after_second = db.query(OutreachMessage).filter_by(id=message_id).first()
+    assert after_second.status == OutreachStatus.sent
+    assert after_second.sent_at == sent_at
+    assert after_second.follow_up_due_at == follow_up_due_at
+
+    events = db.query(Event).filter_by(contact_id=contact_id).all()
+    assert len(events) == 1
+    assert events[0].note == "drafted -> sent"
+    db.close()
+
+
+@patch("app.routes.outreach.anthropic.Anthropic")
+def test_mark_sent_rejects_reverting_replied_message(mock_anthropic_cls, client):
+    from app.db import SessionLocal
+    from app.models import OutreachMessage
+
+    db = SessionLocal()
+    contact = _create_contact(db)
+    contact_id = contact.id
+    db.close()
+
+    mock_anthropic_cls.return_value = _mock_anthropic_returning("Hi Jane, ...")
+    client.post(f"/outreach/generate/{contact_id}", follow_redirects=False)
+
+    db = SessionLocal()
+    message = db.query(OutreachMessage).filter_by(contact_id=contact_id).first()
+    message_id = message.id
+    db.close()
+
+    assert client.post(f"/outreach/{message_id}/mark-sent", follow_redirects=False).status_code == 303
+    assert (
+        client.post(
+            f"/outreach/{message_id}/status", data={"status": "replied"}, follow_redirects=False
+        ).status_code
+        == 303
+    )
+
+    # Re-marking a replied message as sent would wipe the reply state.
+    response = client.post(f"/outreach/{message_id}/mark-sent", follow_redirects=False)
+    assert response.status_code == 400
+
+    db = SessionLocal()
+    updated = db.query(OutreachMessage).filter_by(id=message_id).first()
+    assert updated.status == OutreachStatus.replied
+    db.close()
+
+
+@patch("app.routes.outreach.anthropic.Anthropic")
+def test_full_outreach_lifecycle(mock_anthropic_cls, client):
+    from datetime import datetime, timedelta
+
+    from app.db import SessionLocal
+    from app.models import OutreachChannel, OutreachMessage
+
+    db = SessionLocal()
+    contact = _create_contact(db)
+    contact_id = contact.id
+    db.close()
+
+    mock_anthropic_cls.return_value = _mock_anthropic_returning("Hi Jane, ...")
+    generate = client.post(f"/outreach/generate/{contact_id}", follow_redirects=False)
+    assert generate.status_code == 303
+
+    db = SessionLocal()
+    message = (
+        db.query(OutreachMessage)
+        .filter_by(contact_id=contact_id, channel=OutreachChannel.linkedin)
+        .first()
+    )
+    message_id = message.id
+    db.close()
+
+    # Mark sent: real business-day follow-up window is computed by the route.
+    marked = client.post(f"/outreach/{message_id}/mark-sent", follow_redirects=False)
+    assert marked.status_code == 303
+
+    db = SessionLocal()
+    sent = db.query(OutreachMessage).filter_by(id=message_id).first()
+    assert sent.status == OutreachStatus.sent
+    assert sent.follow_up_due_at is not None
+    # Test setup: simulate the business-day window having elapsed.
+    sent.follow_up_due_at = datetime.utcnow() - timedelta(days=1)
+    db.commit()
+    db.close()
+
+    page = client.get("/outreach")
+    assert page.status_code == 200
+
+    # It now shows up under "Follow-ups due" (draft text + replied/no_response forms),
+    # and no longer under "Drafts awaiting review".
+    follow_ups = _section(page.text, "Follow-ups due")
+    assert "Hi Jane, ..." in follow_ups
+    assert f'action="/outreach/{message_id}/status"' in follow_ups
+    assert 'value="replied"' in follow_ups
+    assert "No follow-ups due right now." not in follow_ups
+    assert f'action="/outreach/{message_id}/mark-sent"' not in page.text
+    assert "Contacted: 1" in page.text
+    assert "Replied: 0" in page.text
+
+    replied = client.post(
+        f"/outreach/{message_id}/status", data={"status": "replied"}, follow_redirects=False
+    )
+    assert replied.status_code == 303
+
+    page = client.get("/outreach")
+    # It moved out of "Follow-ups due" and into "Replied - awaiting outcome".
+    follow_ups = _section(page.text, "Follow-ups due")
+    assert f"/outreach/{message_id}/status" not in follow_ups
+    assert "No follow-ups due right now." in follow_ups
+
+    awaiting = _section(page.text, "Replied &mdash; awaiting outcome")
+    assert f'action="/outreach/{message_id}/status"' in awaiting
+    assert 'value="interview"' in awaiting
+    assert "Jane Doe" in awaiting
+    assert "Contacted: 1" in page.text
+    assert "Replied: 1" in page.text
 
 
 def _create_sent_message(db, contact_id):

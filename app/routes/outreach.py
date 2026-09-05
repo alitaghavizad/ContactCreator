@@ -19,6 +19,7 @@ templates = Jinja2Templates(directory="app/templates")
 VALID_STATUS_VALUES = {"replied", "no_response", "interview", "rejected"}
 
 VALID_TRANSITIONS = {
+    OutreachStatus.drafted: {OutreachStatus.sent},
     OutreachStatus.sent: {OutreachStatus.replied, OutreachStatus.no_response},
     OutreachStatus.replied: {OutreachStatus.interview, OutreachStatus.rejected},
 }
@@ -152,6 +153,12 @@ def mark_sent(message_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Message not found")
 
     old_status = message.status
+    if OutreachStatus.sent not in VALID_TRANSITIONS.get(old_status, set()):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot mark as sent from status {old_status.value}.",
+        )
+
     message.status = OutreachStatus.sent
     message.sent_at = datetime.utcnow()
     follow_up_date = business_days_from(
