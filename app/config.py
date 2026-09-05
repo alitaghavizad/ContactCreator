@@ -11,8 +11,8 @@ class Settings:
     )
     anthropic_api_key: str = os.environ.get("ANTHROPIC_API_KEY", "")
     claude_model: str = os.environ.get("CLAUDE_MODEL", "claude-sonnet-5")
-    apollo_api_key: str = os.environ.get("APOLLO_API_KEY", "")
-    apollo_monthly_credit_limit: int = int(os.environ.get("APOLLO_MONTHLY_CREDIT_LIMIT", "60"))
+    hunter_api_key: str = os.environ.get("HUNTER_API_KEY", "")
+    hunter_monthly_search_limit: int = int(os.environ.get("HUNTER_MONTHLY_SEARCH_LIMIT", "25"))
 
 
 settings = Settings()

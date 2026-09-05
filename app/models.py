@@ -56,7 +56,7 @@ class Company(Base):
     domain = Column(String)
     location = Column(String)
     industry = Column(String)
-    source = Column(String, default="apollo")
+    source = Column(String, default="hunter")
 
 
 class Contact(Base):
@@ -68,7 +68,7 @@ class Contact(Base):
     title = Column(String)
     linkedin_url = Column(String)
     email = Column(String)
-    discovery_source = Column(String, default="apollo")
+    discovery_source = Column(String, default="hunter")
 
     company = relationship("Company")
 
@@ -95,8 +95,8 @@ class Event(Base):
     timestamp = Column(DateTime, default=datetime.utcnow)
 
 
-class ApolloUsage(Base):
-    __tablename__ = "apollo_usage"
+class DiscoveryUsage(Base):
+    __tablename__ = "discovery_usage"
     id = Column(Integer, primary_key=True)
     used = Column(Integer, default=0)
     period_start = Column(Date)

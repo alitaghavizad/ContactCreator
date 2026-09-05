@@ -7,7 +7,7 @@ class CreditLimitExceededError(Exception):
 
 
 class CreditTracker:
-    """Tracks Apollo.io credit usage within the current monthly period.
+    """Tracks discovery-provider usage (e.g. Hunter.io searches) within the current monthly period.
 
     This class only implements the counting rules, in memory, so they can
     be unit tested without a database. Callers (the discovery route) are

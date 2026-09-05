@@ -6,9 +6,11 @@
 </head>
 <body>
     <h1>Contacts</h1>
-    <p>Apollo credits remaining this period: {{ credits_remaining }} / {{ credits_limit }}</p>
+    <p>Hunter.io searches remaining this period: {{ searches_remaining }} / {{ searches_limit }}</p>
     <form action="/contacts/discover" method="post">
-        <button type="submit">Find new contacts</button>
+        <label for="domain">Company domain:</label>
+        <input type="text" id="domain" name="domain" placeholder="example.com" required>
+        <button type="submit">Find contacts at this company</button>
     </form>
     <table border="1" cellpadding="6">
         <thead>

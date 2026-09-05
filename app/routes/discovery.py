@@ -1,28 +1,30 @@
-import json
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
-from app.apollo_client import ApolloClient, SearchCriteria
 from app.config import settings
 from app.credit_tracker import CreditTracker
 from app.db import get_db
-from app.models import ApolloUsage, Company, Contact, User
+from app.hunter_client import HunterClient
+from app.models import Company, Contact, DiscoveryUsage
+from app.routes.intake import get_or_create_default_user
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 
-RESULTS_PER_SEARCH = 25
+# Hunter's free plan caps domain-search results at 10 per request.
+RESULTS_PER_SEARCH = 10
+COST_PER_SEARCH = 1
 PERIOD_LENGTH_DAYS = 30
 
 
-def _load_usage(db: Session) -> ApolloUsage:
-    usage = db.query(ApolloUsage).first()
+def _load_usage(db: Session) -> DiscoveryUsage:
+    usage = db.query(DiscoveryUsage).first()
     if usage is None:
-        usage = ApolloUsage(used=0, period_start=date.today())
+        usage = DiscoveryUsage(used=0, period_start=date.today())
         db.add(usage)
         db.commit()
         db.refresh(usage)
@@ -34,11 +36,11 @@ def list_contacts(request: Request, db: Session = Depends(get_db)):
     contacts = db.query(Contact).all()
     usage = _load_usage(db)
     tracker = CreditTracker(
-        limit=settings.apollo_monthly_credit_limit,
+        limit=settings.hunter_monthly_search_limit,
         used=usage.used,
         period_start=usage.period_start,
     )
-    # Roll the period over here too, so the displayed credit count matches what
+    # Roll the period over here too, so the displayed search count matches what
     # POST /contacts/discover would enforce instead of showing a stale count.
     tracker.reset_if_new_period(today=date.today())
     if tracker.used != usage.used or tracker.period_start != usage.period_start:
@@ -51,55 +53,39 @@ def list_contacts(request: Request, db: Session = Depends(get_db)):
         {
             "request": request,
             "contacts": contacts,
-            "credits_remaining": tracker.remaining(),
-            "credits_limit": tracker.limit,
+            "searches_remaining": tracker.remaining(),
+            "searches_limit": tracker.limit,
         },
     )
 
 
 @router.post("/contacts/discover")
-def discover_contacts(db: Session = Depends(get_db)):
-    user = db.query(User).first()
-    if user is None or user.profile is None:
-        raise HTTPException(status_code=400, detail="Complete intake first at /intake.")
+def discover_contacts(domain: str = Form(...), db: Session = Depends(get_db)):
+    domain = domain.strip().lower()
+    if not domain:
+        raise HTTPException(status_code=400, detail="Please enter a company domain, e.g. example.com.")
 
-    profile = user.profile
+    user = get_or_create_default_user(db)
     usage = _load_usage(db)
     tracker = CreditTracker(
-        limit=settings.apollo_monthly_credit_limit,
+        limit=settings.hunter_monthly_search_limit,
         used=usage.used,
         period_start=usage.period_start,
     )
     tracker.reset_if_new_period(today=date.today())
 
-    criteria = SearchCriteria(
-        titles=json.loads(profile.target_roles or "[]"),
-        locations=json.loads(profile.target_locations or "[]"),
-        industries=json.loads(profile.domains or "[]"),
-        per_page=RESULTS_PER_SEARCH,
-    )
-    # Never spend credits on an unfiltered search.
-    if not criteria.titles or not criteria.locations:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Your profile has no target roles or locations — please update "
-                "your intake answers before discovering contacts."
-            ),
-        )
-
-    if not tracker.can_spend(RESULTS_PER_SEARCH):
+    if not tracker.can_spend(COST_PER_SEARCH):
         resets_on = tracker.period_start + timedelta(days=PERIOD_LENGTH_DAYS)
         raise HTTPException(
             status_code=429,
             detail=(
-                f"Out of Apollo credits until period resets. "
+                f"Out of Hunter.io searches until period resets. "
                 f"{tracker.remaining()} remaining. Resets on {resets_on}."
             ),
         )
 
-    apollo_client = ApolloClient(api_key=settings.apollo_api_key)
-    people = apollo_client.search_people(criteria)
+    hunter_client = HunterClient(api_key=settings.hunter_api_key)
+    people = hunter_client.domain_search(domain, limit=RESULTS_PER_SEARCH)
 
     for person in people:
         company = None
@@ -107,23 +93,26 @@ def discover_contacts(db: Session = Depends(get_db)):
             company = db.query(Company).filter_by(domain=person.company_domain).first()
         if company is None:
             company = Company(
-                name=person.company_name or "Unknown",
+                name=person.company_name or domain,
                 domain=person.company_domain,
-                source="apollo",
+                source="hunter",
             )
             db.add(company)
             db.commit()
             db.refresh(company)
 
-        # Dedupe on linkedin_url, not email: Apollo's free tier returns the same
-        # locked placeholder email (email_not_unlocked@domain.com) for many
-        # different people, and returns no email at all for others.
+        # Dedupe on linkedin_url when present, else on email — Hunter doesn't
+        # always return a LinkedIn URL for a given person.
         existing = None
         if person.linkedin_url:
             existing = (
                 db.query(Contact)
                 .filter_by(linkedin_url=person.linkedin_url, user_id=user.id)
                 .first()
+            )
+        elif person.email:
+            existing = (
+                db.query(Contact).filter_by(email=person.email, user_id=user.id).first()
             )
         if existing is None:
             db.add(
@@ -134,11 +123,11 @@ def discover_contacts(db: Session = Depends(get_db)):
                     title=person.title,
                     linkedin_url=person.linkedin_url,
                     email=person.email,
-                    discovery_source="apollo",
+                    discovery_source="hunter",
                 )
             )
 
-    tracker.spend(RESULTS_PER_SEARCH)
+    tracker.spend(COST_PER_SEARCH)
     usage.used = tracker.used
     usage.period_start = tracker.period_start
     db.commit()

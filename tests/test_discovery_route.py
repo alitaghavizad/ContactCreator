@@ -1,44 +1,16 @@
-import json
 from datetime import date, timedelta
 from unittest.mock import MagicMock, patch
 
-from app.apollo_client import ApolloPerson
-from app.models import Profile, User
+from app.hunter_client import HunterPerson
 
 
-def _create_profile(db, target_roles=None, target_locations=None):
-    user = User(email="local-user@contactcreator.local")
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-
-    profile = Profile(
-        user_id=user.id,
-        cv_text="cv text",
-        skills=json.dumps(["Java"]),
-        years_experience=5,
-        domains=json.dumps(["banking"]),
-        target_roles=json.dumps(["Backend Engineer"] if target_roles is None else target_roles),
-        target_locations=json.dumps(["Yerevan"] if target_locations is None else target_locations),
-        seniority="mid",
-        tone="professional",
-    )
-    db.add(profile)
-    db.commit()
-    return user
-
-
-@patch("app.routes.discovery.ApolloClient")
-def test_discover_contacts_creates_company_and_contact(mock_apollo_cls, client):
+@patch("app.routes.discovery.HunterClient")
+def test_discover_contacts_creates_company_and_contact(mock_hunter_cls, client):
     from app.db import SessionLocal
 
-    db = SessionLocal()
-    _create_profile(db)
-    db.close()
-
-    mock_apollo = MagicMock()
-    mock_apollo.search_people.return_value = [
-        ApolloPerson(
+    mock_hunter = MagicMock()
+    mock_hunter.domain_search.return_value = [
+        HunterPerson(
             name="Jane Doe",
             title="Engineering Manager",
             company_name="Example Bank",
@@ -47,12 +19,15 @@ def test_discover_contacts_creates_company_and_contact(mock_apollo_cls, client):
             email="jane@example.com",
         )
     ]
-    mock_apollo_cls.return_value = mock_apollo
+    mock_hunter_cls.return_value = mock_hunter
 
-    response = client.post("/contacts/discover", follow_redirects=False)
+    response = client.post(
+        "/contacts/discover", data={"domain": "example.com"}, follow_redirects=False
+    )
 
     assert response.status_code == 303
     assert response.headers["location"] == "/contacts"
+    mock_hunter.domain_search.assert_called_once_with("example.com", limit=10)
 
     from app.models import Contact
 
@@ -67,18 +42,34 @@ def test_discover_contacts_creates_company_and_contact(mock_apollo_cls, client):
     assert "Example Bank" in list_response.text
 
 
-@patch("app.routes.discovery.ApolloClient")
-def test_discover_contacts_dedupes_company_and_contact_on_repeat(mock_apollo_cls, client):
+@patch("app.routes.discovery.HunterClient")
+def test_discover_contacts_lowercases_and_strips_domain(mock_hunter_cls, client):
+    mock_hunter = MagicMock()
+    mock_hunter.domain_search.return_value = []
+    mock_hunter_cls.return_value = mock_hunter
+
+    response = client.post(
+        "/contacts/discover", data={"domain": "  Example.COM  "}, follow_redirects=False
+    )
+
+    assert response.status_code == 303
+    mock_hunter.domain_search.assert_called_once_with("example.com", limit=10)
+
+
+def test_discover_contacts_rejects_empty_domain(client):
+    response = client.post("/contacts/discover", data={"domain": "   "}, follow_redirects=False)
+    assert response.status_code == 400
+    assert "domain" in response.json()["detail"].lower()
+
+
+@patch("app.routes.discovery.HunterClient")
+def test_discover_contacts_dedupes_company_and_contact_on_repeat(mock_hunter_cls, client):
     from app.db import SessionLocal
     from app.models import Company, Contact
 
-    db = SessionLocal()
-    _create_profile(db)
-    db.close()
-
-    mock_apollo = MagicMock()
-    mock_apollo.search_people.return_value = [
-        ApolloPerson(
+    mock_hunter = MagicMock()
+    mock_hunter.domain_search.return_value = [
+        HunterPerson(
             name="Jane Doe",
             title="Engineering Manager",
             company_name="Example Bank",
@@ -87,13 +78,16 @@ def test_discover_contacts_dedupes_company_and_contact_on_repeat(mock_apollo_cls
             email="jane@example.com",
         )
     ]
-    mock_apollo_cls.return_value = mock_apollo
+    mock_hunter_cls.return_value = mock_hunter
 
-    first_response = client.post("/contacts/discover", follow_redirects=False)
+    first_response = client.post(
+        "/contacts/discover", data={"domain": "example.com"}, follow_redirects=False
+    )
     assert first_response.status_code == 303
-    assert first_response.headers["location"] == "/contacts"
 
-    second_response = client.post("/contacts/discover", follow_redirects=False)
+    second_response = client.post(
+        "/contacts/discover", data={"domain": "example.com"}, follow_redirects=False
+    )
     assert second_response.status_code == 303
 
     db = SessionLocal()
@@ -102,173 +96,124 @@ def test_discover_contacts_dedupes_company_and_contact_on_repeat(mock_apollo_cls
     db.close()
 
 
-@patch("app.routes.discovery.ApolloClient")
-def test_discover_contacts_dedupes_on_linkedin_url_not_email(mock_apollo_cls, client):
-    """Apollo's free tier reuses one locked placeholder email across people.
-
-    Distinct linkedin_urls must produce distinct Contacts even when the email
-    is identical, and a repeat search must not re-insert people whose email is
-    missing entirely.
-    """
+@patch("app.routes.discovery.HunterClient")
+def test_discover_contacts_dedupes_on_linkedin_url_or_email(mock_hunter_cls, client):
+    """Distinct linkedin_urls produce distinct Contacts; a person with no
+    linkedin_url falls back to deduping on email instead."""
     from app.db import SessionLocal
     from app.models import Contact
 
-    db = SessionLocal()
-    _create_profile(db)
-    db.close()
-
-    mock_apollo = MagicMock()
-    mock_apollo.search_people.return_value = [
-        ApolloPerson(
+    mock_hunter = MagicMock()
+    mock_hunter.domain_search.return_value = [
+        HunterPerson(
             name="Jane Doe",
             title="Engineering Manager",
             company_name="Example Bank",
             company_domain="example.com",
             linkedin_url="https://linkedin.com/in/janedoe",
-            email="email_not_unlocked@domain.com",
+            email="jane@example.com",
         ),
-        ApolloPerson(
-            name="John Smith",
-            title="Director of Engineering",
-            company_name="Example Bank",
-            company_domain="example.com",
-            linkedin_url="https://linkedin.com/in/johnsmith",
-            email="email_not_unlocked@domain.com",
-        ),
-        ApolloPerson(
-            name="No Email Person",
+        HunterPerson(
+            name="No LinkedIn Person",
             title="Recruiter",
             company_name="Example Bank",
             company_domain="example.com",
-            linkedin_url="https://linkedin.com/in/noemailperson",
-            email=None,
+            linkedin_url=None,
+            email="nolinkedin@example.com",
         ),
     ]
-    mock_apollo_cls.return_value = mock_apollo
+    mock_hunter_cls.return_value = mock_hunter
 
-    assert client.post("/contacts/discover", follow_redirects=False).status_code == 303
+    assert (
+        client.post(
+            "/contacts/discover", data={"domain": "example.com"}, follow_redirects=False
+        ).status_code
+        == 303
+    )
 
     db = SessionLocal()
     names = sorted(c.name for c in db.query(Contact).all())
     db.close()
-    # Same placeholder email, different people -> three distinct contacts.
-    assert names == ["Jane Doe", "John Smith", "No Email Person"]
+    assert names == ["Jane Doe", "No LinkedIn Person"]
 
-    # A repeat search dedupes all three, including the one with no email.
-    assert client.post("/contacts/discover", follow_redirects=False).status_code == 303
+    # A repeat search dedupes both, including the one with no LinkedIn URL.
+    assert (
+        client.post(
+            "/contacts/discover", data={"domain": "example.com"}, follow_redirects=False
+        ).status_code
+        == 303
+    )
 
     db = SessionLocal()
-    assert db.query(Contact).count() == 3
+    assert db.query(Contact).count() == 2
     db.close()
 
 
-def test_discover_contacts_requires_profile(client):
-    response = client.post("/contacts/discover", follow_redirects=False)
-    assert response.status_code == 400
-
-
-@patch("app.routes.discovery.ApolloClient")
-def test_discover_contacts_blocks_when_out_of_credits(mock_apollo_cls, client):
+@patch("app.routes.discovery.HunterClient")
+def test_discover_contacts_blocks_when_out_of_searches(mock_hunter_cls, client):
     from app.db import SessionLocal
-    from app.models import ApolloUsage
+    from app.models import DiscoveryUsage
 
     period_start = date.today()
     db = SessionLocal()
-    _create_profile(db)
-    db.add(ApolloUsage(used=60, period_start=period_start))
+    db.add(DiscoveryUsage(used=25, period_start=period_start))
     db.commit()
     db.close()
 
-    response = client.post("/contacts/discover", follow_redirects=False)
+    response = client.post(
+        "/contacts/discover", data={"domain": "example.com"}, follow_redirects=False
+    )
 
     assert response.status_code == 429
     detail = response.json()["detail"]
-    # The user is told when credits come back.
+    # The user is told when searches come back.
     assert str(period_start + timedelta(days=30)) in detail
-    mock_apollo_cls.assert_not_called()
+    mock_hunter_cls.assert_not_called()
 
 
-@patch("app.routes.discovery.ApolloClient")
-def test_discover_contacts_rejects_empty_search_criteria(mock_apollo_cls, client):
-    """No target roles -> 400 and no credits spent, no Apollo call."""
-    from app.db import SessionLocal
-    from app.models import ApolloUsage
-
-    db = SessionLocal()
-    _create_profile(db, target_roles=[])
-    db.close()
-
-    response = client.post("/contacts/discover", follow_redirects=False)
-
-    assert response.status_code == 400
-    assert "target roles or locations" in response.json()["detail"]
-    mock_apollo_cls.assert_not_called()
-
-    db = SessionLocal()
-    usage = db.query(ApolloUsage).first()
-    assert usage.used == 0
-    db.close()
-
-
-@patch("app.routes.discovery.ApolloClient")
-def test_discover_contacts_rejects_empty_locations(mock_apollo_cls, client):
-    from app.db import SessionLocal
-
-    db = SessionLocal()
-    _create_profile(db, target_locations=[])
-    db.close()
-
-    response = client.post("/contacts/discover", follow_redirects=False)
-
-    assert response.status_code == 400
-    mock_apollo_cls.assert_not_called()
-
-
-def test_list_contacts_shows_reset_credits_after_period_rollover(client):
+def test_list_contacts_shows_reset_searches_after_period_rollover(client):
     """GET /contacts must roll the period over itself, not wait for a POST."""
     from app.db import SessionLocal
     from app.config import settings
-    from app.models import ApolloUsage
+    from app.models import DiscoveryUsage
 
     db = SessionLocal()
-    _create_profile(db)
     # A fully-spent period that ended 31 days ago.
-    db.add(ApolloUsage(used=60, period_start=date.today() - timedelta(days=31)))
+    db.add(DiscoveryUsage(used=25, period_start=date.today() - timedelta(days=31)))
     db.commit()
     db.close()
 
     response = client.get("/contacts")
 
     assert response.status_code == 200
-    limit = settings.apollo_monthly_credit_limit
+    limit = settings.hunter_monthly_search_limit
     assert f"{limit} / {limit}" in response.text
 
     # The rollover is persisted, not just displayed.
     db = SessionLocal()
-    usage = db.query(ApolloUsage).first()
+    usage = db.query(DiscoveryUsage).first()
     assert usage.used == 0
     assert usage.period_start == date.today()
     db.close()
 
 
-def test_list_contacts_shows_used_credits_within_period(client):
+def test_list_contacts_shows_used_searches_within_period(client):
     """Guard against the rollover resetting a period that is still current."""
     from app.db import SessionLocal
     from app.config import settings
-    from app.models import ApolloUsage
+    from app.models import DiscoveryUsage
 
     db = SessionLocal()
-    _create_profile(db)
-    db.add(ApolloUsage(used=25, period_start=date.today() - timedelta(days=3)))
+    db.add(DiscoveryUsage(used=10, period_start=date.today() - timedelta(days=3)))
     db.commit()
     db.close()
 
     response = client.get("/contacts")
 
-    limit = settings.apollo_monthly_credit_limit
-    assert f"{limit - 25} / {limit}" in response.text
+    limit = settings.hunter_monthly_search_limit
+    assert f"{limit - 10} / {limit}" in response.text
 
     db = SessionLocal()
-    usage = db.query(ApolloUsage).first()
-    assert usage.used == 25
+    usage = db.query(DiscoveryUsage).first()
+    assert usage.used == 10
     db.close()
