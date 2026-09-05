@@ -1,19 +1,15 @@
-import os
-
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL", "postgresql://contactcreator:contactcreator@db:5432/contactcreator"
-)
+from app.config import settings
 
-if DATABASE_URL.startswith("sqlite"):
+if settings.database_url.startswith("sqlite"):
     engine = create_engine(
-        DATABASE_URL, connect_args={"check_same_thread": False}, poolclass=StaticPool
+        settings.database_url, connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
 else:
-    engine = create_engine(DATABASE_URL)
+    engine = create_engine(settings.database_url)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
