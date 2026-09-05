@@ -22,6 +22,18 @@ and the answers they gave to a short intake questionnaire, then return ONLY a JS
 """
 
 
+def _first_text_block(message) -> str:
+    """Return the text of the first text content block in a Claude response.
+
+    Claude responses may contain non-text blocks (e.g. thinking blocks) before
+    the text block, so indexing content[0] blindly is unsafe.
+    """
+    for block in message.content or []:
+        if getattr(block, "type", None) == "text":
+            return block.text
+    raise CVParseError("Claude response contained no text content block.")
+
+
 @dataclass
 class StructuredProfile:
     skills: list[str] = field(default_factory=list)
@@ -41,7 +53,7 @@ def parse_cv(
 ) -> StructuredProfile:
     message = client.messages.create(
         model=model,
-        max_tokens=1024,
+        max_tokens=2048,
         system=CV_PARSE_SYSTEM_PROMPT,
         messages=[
             {
@@ -53,7 +65,7 @@ def parse_cv(
             }
         ],
     )
-    raw_text = message.content[0].text
+    raw_text = _first_text_block(message)
     try:
         data = json.loads(raw_text)
     except json.JSONDecodeError as e:

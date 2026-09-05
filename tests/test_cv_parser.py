@@ -6,12 +6,26 @@ import pytest
 from app.cv_parser import CVParseError, StructuredProfile, parse_cv
 
 
+def _text_block(text: str):
+    block = MagicMock()
+    block.type = "text"
+    block.text = text
+    return block
+
+
+def _thinking_block():
+    """A non-text block, as Claude may emit before the text block."""
+    block = MagicMock()
+    block.type = "thinking"
+    block.thinking = "Let me look at the CV..."
+    del block.text  # a thinking block has no .text attribute at all
+    return block
+
+
 def _mock_anthropic_client(payload: dict):
     mock_client = MagicMock()
-    mock_content_block = MagicMock()
-    mock_content_block.text = json.dumps(payload)
     mock_message = MagicMock()
-    mock_message.content = [mock_content_block]
+    mock_message.content = [_text_block(json.dumps(payload))]
     mock_client.messages.create.return_value = mock_message
     return mock_client
 
@@ -64,11 +78,9 @@ def test_parse_cv_defaults_missing_fields():
 def test_parse_cv_raises_cvparse_error_on_invalid_json():
     """Verify CVParseError is raised when Claude returns non-JSON text."""
     mock_client = MagicMock()
-    mock_content_block = MagicMock()
-    # Simulate Claude returning text with JSON embedded but not parseable as-is
-    mock_content_block.text = 'Sure! Here\'s the profile: {"skills": ["Java"]}'
     mock_message = MagicMock()
-    mock_message.content = [mock_content_block]
+    # Simulate Claude returning text with JSON embedded but not parseable as-is
+    mock_message.content = [_text_block('Sure! Here\'s the profile: {"skills": ["Java"]}')]
     mock_client.messages.create.return_value = mock_message
 
     with pytest.raises(CVParseError) as exc_info:
@@ -80,3 +92,72 @@ def test_parse_cv_raises_cvparse_error_on_invalid_json():
         )
 
     assert "Claude did not return valid JSON" in str(exc_info.value)
+
+
+def test_parse_cv_skips_non_text_content_blocks():
+    """A thinking block before the text block must not break extraction."""
+    payload = {
+        "skills": ["Java"],
+        "years_experience": 5,
+        "domains": ["banking"],
+        "target_roles": ["Backend Engineer"],
+        "target_locations": ["Yerevan"],
+        "seniority": "mid",
+        "tone": "professional",
+    }
+    mock_client = MagicMock()
+    mock_message = MagicMock()
+    mock_message.content = [_thinking_block(), _text_block(json.dumps(payload))]
+    mock_client.messages.create.return_value = mock_message
+
+    profile = parse_cv(
+        cv_text="5 years Java developer...",
+        questionnaire_answers="",
+        client=mock_client,
+        model="claude-sonnet-5",
+    )
+
+    assert profile.skills == ["Java"]
+    assert profile.years_experience == 5
+    assert profile.target_roles == ["Backend Engineer"]
+
+
+def test_parse_cv_raises_when_no_text_block_present():
+    """Empty / text-free content raises CVParseError instead of IndexError."""
+    mock_client = MagicMock()
+    mock_message = MagicMock()
+    mock_message.content = []
+    mock_client.messages.create.return_value = mock_message
+
+    with pytest.raises(CVParseError) as exc_info:
+        parse_cv(
+            cv_text="cv",
+            questionnaire_answers="",
+            client=mock_client,
+            model="claude-sonnet-5",
+        )
+
+    assert "no text content block" in str(exc_info.value)
+
+    mock_message.content = [_thinking_block()]
+    with pytest.raises(CVParseError):
+        parse_cv(
+            cv_text="cv",
+            questionnaire_answers="",
+            client=mock_client,
+            model="claude-sonnet-5",
+        )
+
+
+def test_parse_cv_requests_headroom_max_tokens():
+    mock_client = _mock_anthropic_client({"skills": ["Java"]})
+
+    parse_cv(
+        cv_text="cv",
+        questionnaire_answers="",
+        client=mock_client,
+        model="claude-sonnet-5",
+    )
+
+    _, kwargs = mock_client.messages.create.call_args
+    assert kwargs["max_tokens"] == 2048

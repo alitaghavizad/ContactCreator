@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.config import settings
 from app.cv_parser import CVParseError, parse_cv
@@ -58,7 +59,10 @@ async def submit_intake(
 
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
     try:
-        structured = parse_cv(
+        # parse_cv makes a blocking Anthropic SDK call; run it off the event
+        # loop so it does not stall every other request while it is in flight.
+        structured = await run_in_threadpool(
+            parse_cv,
             cv_text=cv_text,
             questionnaire_answers=questionnaire_answers,
             client=client,

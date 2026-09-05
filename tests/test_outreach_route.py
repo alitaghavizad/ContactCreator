@@ -2,7 +2,8 @@ import json
 from unittest.mock import MagicMock, patch
 
 from app.drafting import DraftingError
-from app.models import Company, Contact, OutreachMessage, Profile, User
+from app.db import SessionLocal
+from app.models import Company, Contact, OutreachMessage, OutreachStatus, Profile, User
 
 
 def _create_contact(db):
@@ -47,6 +48,7 @@ def _create_contact(db):
 def _mock_anthropic_returning(text: str):
     mock_client = MagicMock()
     mock_content_block = MagicMock()
+    mock_content_block.type = "text"
     mock_content_block.text = text
     mock_message = MagicMock()
     mock_message.content = [mock_content_block]
@@ -65,12 +67,16 @@ def test_generate_drafts_creates_two_messages(mock_anthropic_cls, client):
 
     mock_anthropic_cls.return_value = _mock_anthropic_returning("Hi Jane, ...")
 
-    response = client.post(f"/outreach/generate/{contact_id}")
+    response = client.post(f"/outreach/generate/{contact_id}", follow_redirects=False)
 
-    assert response.status_code == 200
-    body = response.json()
-    assert "linkedin" in body
-    assert "email" in body
+    assert response.status_code == 303
+    assert response.headers["location"] == "/outreach"
+
+    db = SessionLocal()
+    messages = db.query(OutreachMessage).filter_by(contact_id=contact_id).all()
+    channels = sorted(m.channel.value for m in messages)
+    db.close()
+    assert channels == ["email", "linkedin"]
 
     outreach_response = client.get("/outreach")
     assert "Jane Doe" in outreach_response.text
@@ -114,16 +120,26 @@ def test_mark_sent_updates_status_and_follow_up(mock_anthropic_cls, client):
     db.close()
 
     mock_anthropic_cls.return_value = _mock_anthropic_returning("Hi Jane, ...")
-    client.post(f"/outreach/generate/{contact_id}")
+    client.post(f"/outreach/generate/{contact_id}", follow_redirects=False)
 
     db = SessionLocal()
     message = db.query(OutreachMessage).filter_by(contact_id=contact_id).first()
     message_id = message.id
     db.close()
 
-    response = client.post(f"/outreach/{message_id}/mark-sent")
+    response = client.post(f"/outreach/{message_id}/mark-sent", follow_redirects=False)
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["status"] == "sent"
-    assert "follow_up_due_at" in body
+    assert response.status_code == 303
+    assert response.headers["location"] == "/outreach"
+
+    db = SessionLocal()
+    message = db.query(OutreachMessage).filter_by(id=message_id).first()
+    assert message.status == OutreachStatus.sent
+    assert message.sent_at is not None
+    assert message.follow_up_due_at is not None
+    assert (message.follow_up_due_at - message.sent_at).days == 6
+    db.close()
+
+    # The sent message drops out of the review queue.
+    queue = client.get("/outreach")
+    assert f"/outreach/{message_id}/mark-sent" not in queue.text

@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 
 import anthropic
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
@@ -78,7 +79,8 @@ def generate_drafts(contact_id: int, db: Session = Depends(get_db)):
     )
     db.commit()
 
-    return {"linkedin": linkedin_text, "email": email_text}
+    # Browser form post: send the user to the review queue rather than raw JSON.
+    return RedirectResponse(url="/outreach", status_code=303)
 
 
 @router.get("/outreach")
@@ -100,4 +102,5 @@ def mark_sent(message_id: int, db: Session = Depends(get_db)):
     message.follow_up_due_at = datetime.utcnow() + timedelta(days=6)
     db.commit()
 
-    return {"status": "sent", "follow_up_due_at": message.follow_up_due_at.isoformat()}
+    # Browser form post: send the user back to the review queue.
+    return RedirectResponse(url="/outreach", status_code=303)

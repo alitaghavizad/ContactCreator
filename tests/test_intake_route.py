@@ -1,8 +1,12 @@
+import asyncio
 import io
 import json
+import time
 from unittest.mock import MagicMock, patch
 
-from app.cv_parser import CVParseError
+import httpx
+
+from app.cv_parser import CVParseError, StructuredProfile
 from app.db import SessionLocal
 from app.models import Profile, User
 
@@ -10,6 +14,7 @@ from app.models import Profile, User
 def _mock_claude_response(mock_anthropic_cls, response_text):
     mock_client = MagicMock()
     mock_content_block = MagicMock()
+    mock_content_block.type = "text"
     mock_content_block.text = response_text
     mock_message = MagicMock()
     mock_message.content = [mock_content_block]
@@ -168,3 +173,68 @@ def test_submit_intake_upserts_single_profile_no_duplicates(mock_anthropic_cls, 
         assert profile.tone == "casual"
     finally:
         db.close()
+
+
+@patch("app.routes.intake.parse_cv")
+def test_submit_intake_does_not_block_event_loop(mock_parse_cv, client):
+    """The blocking Claude call must run in a threadpool, not on the event loop.
+
+    While /intake is waiting on parse_cv, an unrelated request (/health) must
+    still be served promptly. If parse_cv were awaited inline on the event
+    loop, /health could not even be dispatched until parse_cv returned.
+    """
+    parse_delay = 1.0
+
+    def slow_parse(**kwargs):
+        time.sleep(parse_delay)
+        return StructuredProfile(
+            skills=["Java"],
+            years_experience=5,
+            domains=["banking"],
+            target_roles=["Backend Engineer"],
+            target_locations=["Yerevan"],
+            seniority="mid",
+            tone="professional",
+        )
+
+    mock_parse_cv.side_effect = slow_parse
+
+    async def scenario():
+        from app.main import app
+
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+            started = time.monotonic()
+            intake_task = asyncio.create_task(
+                ac.post(
+                    "/intake",
+                    data={
+                        "target_roles": "Backend Engineer",
+                        "target_locations": "Yerevan",
+                        "domains": "banking",
+                        "seniority": "mid",
+                    },
+                    files={"cv_file": ("cv.txt", io.BytesIO(b"cv text"), "text/plain")},
+                    follow_redirects=False,
+                )
+            )
+            # Give the intake request a moment to reach parse_cv. If parse_cv
+            # runs on the event loop, this sleep itself cannot resume until it
+            # finishes, so elapsed time is measured from before the task start.
+            await asyncio.sleep(0.1)
+
+            health = await ac.get("/health")
+            health_elapsed = time.monotonic() - started
+
+            intake_response = await intake_task
+            return health, health_elapsed, intake_response
+
+    health, health_elapsed, intake_response = asyncio.run(scenario())
+
+    assert health.status_code == 200
+    # /health served long before the 1.0s parse_cv call finished.
+    assert health_elapsed < parse_delay / 2, (
+        f"/health took {health_elapsed:.2f}s - the event loop was blocked by parse_cv"
+    )
+    assert intake_response.status_code == 303
+    assert intake_response.headers["location"] == "/contacts"

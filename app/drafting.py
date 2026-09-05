@@ -8,6 +8,19 @@ class DraftingError(Exception):
 
 LINKEDIN_CHAR_LIMIT = 300
 
+
+def _first_text_block(message) -> str:
+    """Return the text of the first text content block in a Claude response.
+
+    Claude responses may contain non-text blocks (e.g. thinking blocks) before
+    the text block, so indexing content[0] blindly is unsafe.
+    """
+    for block in message.content or []:
+        if getattr(block, "type", None) == "text":
+            return block.text
+    raise DraftingError("Claude response contained no text content block.")
+
+
 LINKEDIN_SYSTEM_PROMPT = """You write short, specific LinkedIn connection notes for a job \
 seeker reaching out to someone in their target industry. The note must be under {limit} \
 characters, reference something concrete from the candidate's background, and avoid generic \
@@ -32,7 +45,7 @@ def draft_linkedin_note(
     system = LINKEDIN_SYSTEM_PROMPT.format(limit=LINKEDIN_CHAR_LIMIT)
     message = client.messages.create(
         model=model,
-        max_tokens=200,
+        max_tokens=500,
         system=system,
         messages=[
             {
@@ -46,7 +59,7 @@ def draft_linkedin_note(
     )
     if not message.content:
         raise DraftingError("Claude returned an empty response with no content blocks")
-    note = message.content[0].text.strip()
+    note = _first_text_block(message).strip()
     return note[:LINKEDIN_CHAR_LIMIT]
 
 
@@ -60,7 +73,7 @@ def draft_email(
 ) -> str:
     message = client.messages.create(
         model=model,
-        max_tokens=600,
+        max_tokens=1200,
         system=EMAIL_SYSTEM_PROMPT,
         messages=[
             {
@@ -74,4 +87,4 @@ def draft_email(
     )
     if not message.content:
         raise DraftingError("Claude returned an empty response with no content blocks")
-    return message.content[0].text.strip()
+    return _first_text_block(message).strip()

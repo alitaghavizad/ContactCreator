@@ -1,7 +1,8 @@
 import json
-from datetime import date
+from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
@@ -15,6 +16,7 @@ router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 
 RESULTS_PER_SEARCH = 25
+PERIOD_LENGTH_DAYS = 30
 
 
 def _load_usage(db: Session) -> ApolloUsage:
@@ -36,6 +38,14 @@ def list_contacts(request: Request, db: Session = Depends(get_db)):
         used=usage.used,
         period_start=usage.period_start,
     )
+    # Roll the period over here too, so the displayed credit count matches what
+    # POST /contacts/discover would enforce instead of showing a stale count.
+    tracker.reset_if_new_period(today=date.today())
+    if tracker.used != usage.used or tracker.period_start != usage.period_start:
+        usage.used = tracker.used
+        usage.period_start = tracker.period_start
+        db.commit()
+
     return templates.TemplateResponse(
         "contacts.html",
         {
@@ -62,18 +72,31 @@ def discover_contacts(db: Session = Depends(get_db)):
     )
     tracker.reset_if_new_period(today=date.today())
 
-    if not tracker.can_spend(RESULTS_PER_SEARCH):
-        raise HTTPException(
-            status_code=429,
-            detail=f"Out of Apollo credits until period resets. {tracker.remaining()} remaining.",
-        )
-
     criteria = SearchCriteria(
-        titles=json.loads(profile.target_roles),
-        locations=json.loads(profile.target_locations),
-        industries=json.loads(profile.domains),
+        titles=json.loads(profile.target_roles or "[]"),
+        locations=json.loads(profile.target_locations or "[]"),
+        industries=json.loads(profile.domains or "[]"),
         per_page=RESULTS_PER_SEARCH,
     )
+    # Never spend credits on an unfiltered search.
+    if not criteria.titles or not criteria.locations:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Your profile has no target roles or locations — please update "
+                "your intake answers before discovering contacts."
+            ),
+        )
+
+    if not tracker.can_spend(RESULTS_PER_SEARCH):
+        resets_on = tracker.period_start + timedelta(days=PERIOD_LENGTH_DAYS)
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"Out of Apollo credits until period resets. "
+                f"{tracker.remaining()} remaining. Resets on {resets_on}."
+            ),
+        )
 
     apollo_client = ApolloClient(api_key=settings.apollo_api_key)
     people = apollo_client.search_people(criteria)
@@ -92,10 +115,15 @@ def discover_contacts(db: Session = Depends(get_db)):
             db.commit()
             db.refresh(company)
 
+        # Dedupe on linkedin_url, not email: Apollo's free tier returns the same
+        # locked placeholder email (email_not_unlocked@domain.com) for many
+        # different people, and returns no email at all for others.
         existing = None
-        if person.email:
+        if person.linkedin_url:
             existing = (
-                db.query(Contact).filter_by(email=person.email, user_id=user.id).first()
+                db.query(Contact)
+                .filter_by(linkedin_url=person.linkedin_url, user_id=user.id)
+                .first()
             )
         if existing is None:
             db.add(
@@ -115,4 +143,6 @@ def discover_contacts(db: Session = Depends(get_db)):
     usage.period_start = tracker.period_start
     db.commit()
 
-    return {"discovered": len(people), "credits_remaining": tracker.remaining()}
+    # Browser form post: send the user back to the contacts page rather than
+    # rendering raw JSON.
+    return RedirectResponse(url="/contacts", status_code=303)
