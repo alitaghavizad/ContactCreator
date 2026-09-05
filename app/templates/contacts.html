@@ -5,6 +5,7 @@
     <title>ContactCreator - Contacts</title>
 </head>
 <body>
+    {% include "_nav.html" %}
     <h1>Contacts</h1>
     <p>Hunter.io searches remaining this period: {{ searches_remaining }} / {{ searches_limit }}</p>
     <form action="/contacts/discover" method="post">
