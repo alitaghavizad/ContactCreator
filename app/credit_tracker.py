@@ -1,17 +1,9 @@
-from dataclasses import dataclass
 from datetime import date
 from typing import Optional
 
 
 class CreditLimitExceededError(Exception):
     pass
-
-
-@dataclass
-class CreditUsage:
-    used: int
-    limit: int
-    period_start: date
 
 
 class CreditTracker:
