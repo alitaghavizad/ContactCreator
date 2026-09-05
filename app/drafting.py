@@ -1,5 +1,11 @@
 import anthropic
 
+
+class DraftingError(Exception):
+    """Raised when Claude's response cannot be used for drafting."""
+    pass
+
+
 LINKEDIN_CHAR_LIMIT = 300
 
 LINKEDIN_SYSTEM_PROMPT = """You write short, specific LinkedIn connection notes for a job \
@@ -38,6 +44,8 @@ def draft_linkedin_note(
             }
         ],
     )
+    if not message.content:
+        raise DraftingError("Claude returned an empty response with no content blocks")
     note = message.content[0].text.strip()
     return note[:LINKEDIN_CHAR_LIMIT]
 
@@ -64,4 +72,6 @@ def draft_email(
             }
         ],
     )
+    if not message.content:
+        raise DraftingError("Claude returned an empty response with no content blocks")
     return message.content[0].text.strip()
