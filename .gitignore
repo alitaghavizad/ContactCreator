@@ -1,0 +1,17 @@
+# Secrets / local config
+.env
+.env.*
+.claude/settings.local.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Docker
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
