@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 
 import anthropic
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -15,6 +15,13 @@ from app.models import Contact, Event, OutreachChannel, OutreachMessage, Outreac
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
+
+VALID_STATUS_VALUES = {"replied", "no_response", "interview", "rejected"}
+
+VALID_TRANSITIONS = {
+    OutreachStatus.sent: {OutreachStatus.replied, OutreachStatus.no_response},
+    OutreachStatus.replied: {OutreachStatus.interview, OutreachStatus.rejected},
+}
 
 
 def _profile_summary(profile) -> str:
@@ -115,4 +122,34 @@ def mark_sent(message_id: int, db: Session = Depends(get_db)):
     db.commit()
 
     # Browser form post: send the user back to the review queue.
+    return RedirectResponse(url="/outreach", status_code=303)
+
+
+@router.post("/outreach/{message_id}/status")
+def update_status(message_id: int, status: str = Form(...), db: Session = Depends(get_db)):
+    if status not in VALID_STATUS_VALUES:
+        raise HTTPException(
+            status_code=400,
+            detail="Status must be one of: replied, no_response, interview, rejected.",
+        )
+
+    message = db.query(OutreachMessage).filter_by(id=message_id).first()
+    if message is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    new_status = OutreachStatus(status)
+    old_status = message.status
+    allowed = VALID_TRANSITIONS.get(old_status, set())
+    if new_status not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot change status from {old_status.value} to {new_status.value}.",
+        )
+
+    message.status = new_status
+    _log_event(
+        db, message.contact_id, new_status.value, f"{old_status.value} -> {new_status.value}"
+    )
+    db.commit()
+
     return RedirectResponse(url="/outreach", status_code=303)

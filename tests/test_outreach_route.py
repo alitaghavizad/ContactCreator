@@ -151,3 +151,168 @@ def test_mark_sent_updates_status_and_follow_up(mock_anthropic_cls, client):
     # The sent message drops out of the review queue.
     queue = client.get("/outreach")
     assert f"/outreach/{message_id}/mark-sent" not in queue.text
+
+
+def _create_sent_message(db, contact_id):
+    from datetime import datetime
+
+    from app.models import OutreachChannel, OutreachMessage, OutreachStatus
+
+    message = OutreachMessage(
+        contact_id=contact_id,
+        channel=OutreachChannel.linkedin,
+        draft_text="Hi there",
+        status=OutreachStatus.sent,
+        sent_at=datetime.utcnow(),
+    )
+    db.add(message)
+    db.commit()
+    db.refresh(message)
+    return message
+
+
+def test_update_status_sent_to_replied(client):
+    from app.db import SessionLocal
+    from app.models import Event, OutreachMessage, OutreachStatus
+
+    db = SessionLocal()
+    contact = _create_contact(db)
+    message = _create_sent_message(db, contact.id)
+    message_id = message.id
+    contact_id = contact.id
+    db.close()
+
+    response = client.post(
+        f"/outreach/{message_id}/status", data={"status": "replied"}, follow_redirects=False
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/outreach"
+
+    db = SessionLocal()
+    updated = db.query(OutreachMessage).filter_by(id=message_id).first()
+    assert updated.status == OutreachStatus.replied
+
+    events = db.query(Event).filter_by(contact_id=contact_id).all()
+    assert len(events) == 1
+    assert events[0].type == "replied"
+    assert events[0].note == "sent -> replied"
+    db.close()
+
+
+def test_update_status_sent_to_no_response(client):
+    from app.db import SessionLocal
+    from app.models import OutreachMessage, OutreachStatus
+
+    db = SessionLocal()
+    contact = _create_contact(db)
+    message = _create_sent_message(db, contact.id)
+    message_id = message.id
+    db.close()
+
+    response = client.post(
+        f"/outreach/{message_id}/status", data={"status": "no_response"}, follow_redirects=False
+    )
+
+    assert response.status_code == 303
+
+    db = SessionLocal()
+    updated = db.query(OutreachMessage).filter_by(id=message_id).first()
+    assert updated.status == OutreachStatus.no_response
+    db.close()
+
+
+def test_update_status_replied_to_interview(client):
+    from app.db import SessionLocal
+    from app.models import OutreachMessage, OutreachStatus
+
+    db = SessionLocal()
+    contact = _create_contact(db)
+    message = _create_sent_message(db, contact.id)
+    message.status = OutreachStatus.replied
+    db.commit()
+    message_id = message.id
+    db.close()
+
+    response = client.post(
+        f"/outreach/{message_id}/status", data={"status": "interview"}, follow_redirects=False
+    )
+
+    assert response.status_code == 303
+
+    db = SessionLocal()
+    updated = db.query(OutreachMessage).filter_by(id=message_id).first()
+    assert updated.status == OutreachStatus.interview
+    db.close()
+
+
+def test_update_status_replied_to_rejected(client):
+    from app.db import SessionLocal
+    from app.models import OutreachMessage, OutreachStatus
+
+    db = SessionLocal()
+    contact = _create_contact(db)
+    message = _create_sent_message(db, contact.id)
+    message.status = OutreachStatus.replied
+    db.commit()
+    message_id = message.id
+    db.close()
+
+    response = client.post(
+        f"/outreach/{message_id}/status", data={"status": "rejected"}, follow_redirects=False
+    )
+
+    assert response.status_code == 303
+
+    db = SessionLocal()
+    updated = db.query(OutreachMessage).filter_by(id=message_id).first()
+    assert updated.status == OutreachStatus.rejected
+    db.close()
+
+
+def test_update_status_rejects_invalid_transition(client):
+    from app.db import SessionLocal
+    from app.models import Event, OutreachMessage, OutreachStatus
+
+    db = SessionLocal()
+    contact = _create_contact(db)
+    message = _create_sent_message(db, contact.id)
+    message_id = message.id
+    contact_id = contact.id
+    db.close()
+
+    # sent -> interview is not a valid direct transition.
+    response = client.post(
+        f"/outreach/{message_id}/status", data={"status": "interview"}, follow_redirects=False
+    )
+
+    assert response.status_code == 400
+
+    db = SessionLocal()
+    updated = db.query(OutreachMessage).filter_by(id=message_id).first()
+    assert updated.status == OutreachStatus.sent
+    assert db.query(Event).filter_by(contact_id=contact_id).count() == 0
+    db.close()
+
+
+def test_update_status_rejects_unknown_status_value(client):
+    from app.db import SessionLocal
+
+    db = SessionLocal()
+    contact = _create_contact(db)
+    message = _create_sent_message(db, contact.id)
+    message_id = message.id
+    db.close()
+
+    response = client.post(
+        f"/outreach/{message_id}/status", data={"status": "bogus"}, follow_redirects=False
+    )
+
+    assert response.status_code == 400
+
+
+def test_update_status_404_for_unknown_message(client):
+    response = client.post(
+        "/outreach/9999/status", data={"status": "replied"}, follow_redirects=False
+    )
+    assert response.status_code == 404
