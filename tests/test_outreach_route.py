@@ -7,23 +7,28 @@ from app.models import Company, Contact, OutreachMessage, OutreachStatus, Profil
 
 
 def _create_contact(db, email="jane@example.com"):
-    user = User(email="local-user@contactcreator.local")
-    db.add(user)
-    db.commit()
-    db.refresh(user)
+    # Reuse the local user across multiple calls within the same test (e.g. a test that
+    # needs two contacts) rather than violating User.email's unique constraint.
+    user = db.query(User).filter_by(email="local-user@contactcreator.local").first()
+    if user is None:
+        user = User(email="local-user@contactcreator.local")
+        db.add(user)
+        db.commit()
+        db.refresh(user)
 
-    profile = Profile(
-        user_id=user.id,
-        cv_text="cv text",
-        skills=json.dumps(["Java"]),
-        years_experience=5,
-        domains=json.dumps(["banking"]),
-        target_roles=json.dumps(["Backend Engineer"]),
-        target_locations=json.dumps(["Yerevan"]),
-        seniority="mid",
-        tone="professional",
-    )
-    db.add(profile)
+        profile = Profile(
+            user_id=user.id,
+            cv_text="cv text",
+            skills=json.dumps(["Java"]),
+            years_experience=5,
+            domains=json.dumps(["banking"]),
+            target_roles=json.dumps(["Backend Engineer"]),
+            target_locations=json.dumps(["Yerevan"]),
+            seniority="mid",
+            tone="professional",
+        )
+        db.add(profile)
+        db.commit()
 
     company = Company(name="Example Bank", domain="example.com", source="apollo")
     db.add(company)
@@ -814,6 +819,104 @@ def test_send_email_blocked_when_daily_cap_exhausted(mock_smtp_cls, client):
 
     assert response.status_code == 429
     mock_smtp_cls.assert_not_called()
+
+
+def test_outreach_page_shows_send_email_button_for_email_with_contact_email(client):
+    db = SessionLocal()
+    contact = _create_contact(db)
+    contact_id = contact.id
+    db.close()
+    _generate_drafts_for(client, contact_id)
+
+    response = client.get("/outreach")
+    section = _section(response.text, "Drafts awaiting review")
+    assert f'action="/outreach/{_email_message_id(contact_id)}/send-email"' in section
+
+
+def test_outreach_page_shows_no_email_note_for_contact_without_email(client):
+    db = SessionLocal()
+    contact = _create_contact(db, email=None)
+    contact_id = contact.id
+    db.close()
+    _generate_drafts_for(client, contact_id)
+
+    response = client.get("/outreach")
+    section = _section(response.text, "Drafts awaiting review")
+    assert "No email on file" in section
+    assert "/send-email" not in section
+
+
+@patch("app.routes.outreach.SMTPEmailClient")
+def test_outreach_page_shows_failed_sends_with_error_and_retry(mock_smtp_cls, client):
+    from app.email_client import EmailSendError
+
+    db = SessionLocal()
+    contact = _create_contact(db)
+    contact_id = contact.id
+    db.close()
+    _generate_drafts_for(client, contact_id)
+    message_id = _email_message_id(contact_id)
+
+    mock_smtp = MagicMock()
+    mock_smtp.send.side_effect = EmailSendError("SMTP auth failed")
+    mock_smtp_cls.return_value = mock_smtp
+    client.post(f"/outreach/{message_id}/send-email", follow_redirects=False)
+
+    response = client.get("/outreach")
+    section = _section(response.text, "Failed sends")
+    assert "SMTP auth failed" in section
+    assert f'action="/outreach/{message_id}/send-email"' in section
+
+
+def test_outreach_page_shows_daily_email_counter(client):
+    from app.config import settings
+
+    response = client.get("/outreach")
+    assert f"Emails sent today: 0 / {settings.daily_email_send_limit}" in response.text
+
+
+def test_full_email_lifecycle(client):
+    from app.email_client import EmailSendError
+
+    db = SessionLocal()
+    ok_contact = _create_contact(db, email="jane@example.com")
+    ok_contact_id = ok_contact.id
+    fail_contact = _create_contact(db, email="john@example.com")
+    fail_contact_id = fail_contact.id
+    db.close()
+
+    _generate_drafts_for(client, ok_contact_id)
+    _generate_drafts_for(client, fail_contact_id)
+    ok_message_id = _email_message_id(ok_contact_id)
+    fail_message_id = _email_message_id(fail_contact_id)
+
+    with patch("app.routes.outreach.SMTPEmailClient") as mock_smtp_cls:
+        mock_smtp_cls.return_value = MagicMock()
+        client.post(f"/outreach/{ok_message_id}/send-email", follow_redirects=False)
+
+    page = client.get("/outreach")
+    assert "Emails sent today: 1" in page.text
+    assert "Contacted: 1" in page.text
+
+    with patch("app.routes.outreach.SMTPEmailClient") as mock_smtp_cls:
+        mock_smtp = MagicMock()
+        mock_smtp.send.side_effect = EmailSendError("SMTP auth failed")
+        mock_smtp_cls.return_value = mock_smtp
+        client.post(f"/outreach/{fail_message_id}/send-email", follow_redirects=False)
+
+    page = client.get("/outreach")
+    failed_section = _section(page.text, "Failed sends")
+    assert "SMTP auth failed" in failed_section
+    assert "Emails sent today: 1" in page.text  # the failed attempt did not spend quota
+
+    with patch("app.routes.outreach.SMTPEmailClient") as mock_smtp_cls:
+        mock_smtp_cls.return_value = MagicMock()
+        client.post(f"/outreach/{fail_message_id}/send-email", follow_redirects=False)
+
+    page = client.get("/outreach")
+    assert "Emails sent today: 2" in page.text
+    failed_section = _section(page.text, "Failed sends")
+    assert "No failed sends." in failed_section
 
 
 def test_mark_sent_rejects_email_channel_message(client):

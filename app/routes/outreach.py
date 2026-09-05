@@ -143,6 +143,9 @@ def list_outreach(request: Request, db: Session = Depends(get_db)):
     replied_awaiting_outcome = (
         db.query(OutreachMessage).filter(OutreachMessage.status == OutreachStatus.replied).all()
     )
+    failed_messages = (
+        db.query(OutreachMessage).filter(OutreachMessage.status == OutreachStatus.failed).all()
+    )
 
     contacted_statuses = [
         OutreachStatus.sent,
@@ -163,6 +166,18 @@ def list_outreach(request: Request, db: Session = Depends(get_db)):
         db.query(OutreachMessage).filter(OutreachMessage.status == OutreachStatus.interview).count()
     )
 
+    email_usage = _load_email_usage(db)
+    email_tracker = CreditTracker(
+        limit=settings.daily_email_send_limit,
+        used=email_usage.used,
+        period_start=email_usage.period_start,
+    )
+    email_tracker.reset_if_new_period(today=date.today(), period_length_days=EMAIL_DAILY_PERIOD_DAYS)
+    if email_tracker.used != email_usage.used or email_tracker.period_start != email_usage.period_start:
+        email_usage.used = email_tracker.used
+        email_usage.period_start = email_tracker.period_start
+        db.commit()
+
     return templates.TemplateResponse(
         "outreach.html",
         {
@@ -170,9 +185,12 @@ def list_outreach(request: Request, db: Session = Depends(get_db)):
             "messages": drafted_messages,
             "follow_ups_due": follow_ups_due,
             "replied_awaiting_outcome": replied_awaiting_outcome,
+            "failed_messages": failed_messages,
             "contacted_count": contacted_count,
             "replied_count": replied_count,
             "interview_count": interview_count,
+            "emails_sent_today": email_tracker.used,
+            "daily_email_limit": email_tracker.limit,
         },
     )
 

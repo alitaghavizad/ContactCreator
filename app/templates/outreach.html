@@ -9,6 +9,7 @@
     <h1>Outreach Queue</h1>
 
     <p>Contacted: {{ contacted_count }} &rarr; Replied: {{ replied_count }} &rarr; Interview: {{ interview_count }}</p>
+    <p>Emails sent today: {{ emails_sent_today }} / {{ daily_email_limit }}</p>
 
     <h2>Follow-ups due</h2>
     {% for message in follow_ups_due %}
@@ -47,14 +48,40 @@
     <p>No replies awaiting an outcome.</p>
     {% endif %}
 
+    <h2>Failed sends</h2>
+    {% for message in failed_messages %}
+    <div style="border:1px solid #d02020; padding:10px; margin-bottom:10px;">
+        <p><strong>{{ message.contact.name }}</strong> ({{ message.channel.value }}) &mdash; {{ message.contact.title }} at {{ message.contact.company.name if message.contact.company else "" }}</p>
+        <p style="color:#d02020;">Error: {{ message.error_message }}</p>
+        <textarea readonly rows="6" cols="60">{{ message.draft_text }}</textarea><br>
+        <form action="/outreach/{{ message.id }}/send-email" method="post" style="display:inline;">
+            <button type="submit">Retry Send</button>
+        </form>
+    </div>
+    {% endfor %}
+    {% if not failed_messages %}
+    <p>No failed sends.</p>
+    {% endif %}
+
     <h2>Drafts awaiting review</h2>
     {% for message in messages %}
     <div style="border:1px solid #ccc; padding:10px; margin-bottom:10px;">
         <p><strong>{{ message.contact.name }}</strong> ({{ message.channel.value }}) &mdash; {{ message.contact.title }} at {{ message.contact.company.name if message.contact.company else "" }}</p>
+        {% if message.channel.value == "email" and message.subject %}
+        <p>Subject: {{ message.subject }}</p>
+        {% endif %}
         <textarea readonly rows="6" cols="60">{{ message.draft_text }}</textarea><br>
+        {% if message.channel.value == "linkedin" %}
         <form action="/outreach/{{ message.id }}/mark-sent" method="post" style="display:inline;">
             <button type="submit">Mark as sent</button>
         </form>
+        {% elif message.contact.email %}
+        <form action="/outreach/{{ message.id }}/send-email" method="post" style="display:inline;">
+            <button type="submit">Send Email</button>
+        </form>
+        {% else %}
+        <p>No email on file.</p>
+        {% endif %}
     </div>
     {% endfor %}
     {% if not messages %}
