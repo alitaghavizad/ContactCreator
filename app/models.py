@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime
+from sqlalchemy import Column, Date, DateTime
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.orm import declarative_base, relationship
@@ -93,3 +93,10 @@ class Event(Base):
     type = Column(String, nullable=False)
     note = Column(Text)
     timestamp = Column(DateTime, default=datetime.utcnow)
+
+
+class ApolloUsage(Base):
+    __tablename__ = "apollo_usage"
+    id = Column(Integer, primary_key=True)
+    used = Column(Integer, default=0)
+    period_start = Column(Date)

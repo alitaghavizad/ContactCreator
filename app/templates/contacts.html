@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>ContactCreator - Contacts</title>
+</head>
+<body>
+    <h1>Contacts</h1>
+    <p>Apollo credits remaining this period: {{ credits_remaining }} / {{ credits_limit }}</p>
+    <form action="/contacts/discover" method="post">
+        <button type="submit">Find new contacts</button>
+    </form>
+    <table border="1" cellpadding="6">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Title</th>
+                <th>Company</th>
+                <th>LinkedIn</th>
+                <th>Email</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for contact in contacts %}
+            <tr>
+                <td>{{ contact.name }}</td>
+                <td>{{ contact.title }}</td>
+                <td>{{ contact.company.name if contact.company else "" }}</td>
+                <td><a href="{{ contact.linkedin_url }}">{{ contact.linkedin_url }}</a></td>
+                <td>{{ contact.email }}</td>
+                <td>
+                    <form action="/outreach/generate/{{ contact.id }}" method="post">
+                        <button type="submit">Generate drafts</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <p><a href="/outreach">Go to outreach queue</a></p>
+</body>
+</html>
