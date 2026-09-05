@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>ContactCreator - Outreach Queue</title>
+</head>
+<body>
+    <h1>Outreach Queue</h1>
+    {% for message in messages %}
+    <div style="border:1px solid #ccc; padding:10px; margin-bottom:10px;">
+        <p><strong>{{ message.contact.name }}</strong> ({{ message.channel.value }}) &mdash; {{ message.contact.title }} at {{ message.contact.company.name if message.contact.company else "" }}</p>
+        <textarea readonly rows="6" cols="60">{{ message.draft_text }}</textarea><br>
+        <form action="/outreach/{{ message.id }}/mark-sent" method="post" style="display:inline;">
+            <button type="submit">Mark as sent</button>
+        </form>
+    </div>
+    {% endfor %}
+    {% if not messages %}
+    <p>No drafts waiting for review. Go to <a href="/contacts">Contacts</a> to discover people and generate drafts.</p>
+    {% endif %}
+</body>
+</html>
