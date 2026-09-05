@@ -6,7 +6,7 @@ from app.db import SessionLocal
 from app.models import Company, Contact, OutreachMessage, OutreachStatus, Profile, User
 
 
-def _create_contact(db):
+def _create_contact(db, email="jane@example.com"):
     user = User(email="local-user@contactcreator.local")
     db.add(user)
     db.commit()
@@ -36,7 +36,7 @@ def _create_contact(db):
         name="Jane Doe",
         title="Engineering Manager",
         linkedin_url="https://linkedin.com/in/janedoe",
-        email="jane@example.com",
+        email=email,
         discovery_source="apollo",
     )
     db.add(contact)
@@ -610,3 +610,230 @@ def test_outreach_page_shows_replied_awaiting_outcome(client):
     response = client.get("/outreach")
 
     assert f"/outreach/{message_id}/status" in response.text
+
+
+def _generate_drafts_for(client, contact_id):
+    from unittest.mock import patch
+
+    with patch("app.routes.outreach.anthropic.Anthropic") as mock_anthropic_cls:
+        mock_anthropic_cls.return_value = _mock_anthropic_returning("Hi Jane, ...")
+        client.post(f"/outreach/generate/{contact_id}", follow_redirects=False)
+
+
+def _email_message_id(contact_id):
+    from app.db import SessionLocal
+    from app.models import OutreachChannel, OutreachMessage
+
+    db = SessionLocal()
+    message = (
+        db.query(OutreachMessage)
+        .filter_by(contact_id=contact_id, channel=OutreachChannel.email)
+        .first()
+    )
+    message_id = message.id
+    db.close()
+    return message_id
+
+
+@patch("app.routes.outreach.SMTPEmailClient")
+def test_send_email_success(mock_smtp_cls, client):
+    from app.business_days import business_days_from
+    from app.config import settings
+    from app.db import SessionLocal
+    from app.models import Event, EmailSendUsage, OutreachMessage, OutreachStatus
+
+    db = SessionLocal()
+    contact = _create_contact(db)
+    contact_id = contact.id
+    db.close()
+    _generate_drafts_for(client, contact_id)
+    message_id = _email_message_id(contact_id)
+
+    mock_smtp = MagicMock()
+    mock_smtp_cls.return_value = mock_smtp
+
+    response = client.post(f"/outreach/{message_id}/send-email", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/outreach"
+    mock_smtp.send.assert_called_once_with("jane@example.com", "Hi Jane, ...", "Hi Jane, ...")
+
+    db = SessionLocal()
+    message = db.query(OutreachMessage).filter_by(id=message_id).first()
+    assert message.status == OutreachStatus.sent
+    assert message.sent_at is not None
+    assert message.error_message is None
+    expected_date = business_days_from(message.sent_at.date(), settings.follow_up_business_days)
+    assert message.follow_up_due_at.date() == expected_date
+
+    events = db.query(Event).filter_by(contact_id=contact_id).all()
+    assert len(events) == 1
+    assert events[0].type == "sent"
+
+    usage = db.query(EmailSendUsage).first()
+    assert usage.used == 1
+    db.close()
+
+
+@patch("app.routes.outreach.SMTPEmailClient")
+def test_send_email_failure_sets_failed_status_and_does_not_spend_cap(mock_smtp_cls, client):
+    from app.email_client import EmailSendError
+    from app.db import SessionLocal
+    from app.models import Event, EmailSendUsage, OutreachMessage, OutreachStatus
+
+    db = SessionLocal()
+    contact = _create_contact(db)
+    contact_id = contact.id
+    db.close()
+    _generate_drafts_for(client, contact_id)
+    message_id = _email_message_id(contact_id)
+
+    mock_smtp = MagicMock()
+    mock_smtp.send.side_effect = EmailSendError("SMTP auth failed")
+    mock_smtp_cls.return_value = mock_smtp
+
+    response = client.post(f"/outreach/{message_id}/send-email", follow_redirects=False)
+
+    assert response.status_code == 303
+
+    db = SessionLocal()
+    message = db.query(OutreachMessage).filter_by(id=message_id).first()
+    assert message.status == OutreachStatus.failed
+    assert message.error_message == "SMTP auth failed"
+
+    events = db.query(Event).filter_by(contact_id=contact_id).all()
+    assert len(events) == 1
+    assert events[0].type == "failed"
+
+    usage = db.query(EmailSendUsage).first()
+    assert usage is None or usage.used == 0
+    db.close()
+
+
+@patch("app.routes.outreach.SMTPEmailClient")
+def test_send_email_retry_after_failure_succeeds(mock_smtp_cls, client):
+    from app.email_client import EmailSendError
+    from app.db import SessionLocal
+    from app.models import OutreachMessage, OutreachStatus
+
+    db = SessionLocal()
+    contact = _create_contact(db)
+    contact_id = contact.id
+    db.close()
+    _generate_drafts_for(client, contact_id)
+    message_id = _email_message_id(contact_id)
+
+    mock_smtp_fail = MagicMock()
+    mock_smtp_fail.send.side_effect = EmailSendError("SMTP auth failed")
+    mock_smtp_cls.return_value = mock_smtp_fail
+    client.post(f"/outreach/{message_id}/send-email", follow_redirects=False)
+
+    mock_smtp_ok = MagicMock()
+    mock_smtp_cls.return_value = mock_smtp_ok
+    response = client.post(f"/outreach/{message_id}/send-email", follow_redirects=False)
+
+    assert response.status_code == 303
+
+    db = SessionLocal()
+    message = db.query(OutreachMessage).filter_by(id=message_id).first()
+    assert message.status == OutreachStatus.sent
+    assert message.error_message is None
+    db.close()
+
+
+def test_send_email_rejects_linkedin_message(client):
+    from app.db import SessionLocal
+    from app.models import OutreachChannel, OutreachMessage
+
+    db = SessionLocal()
+    contact = _create_contact(db)
+    contact_id = contact.id
+    db.close()
+    _generate_drafts_for(client, contact_id)
+
+    db = SessionLocal()
+    linkedin_message = (
+        db.query(OutreachMessage)
+        .filter_by(contact_id=contact_id, channel=OutreachChannel.linkedin)
+        .first()
+    )
+    message_id = linkedin_message.id
+    db.close()
+
+    response = client.post(f"/outreach/{message_id}/send-email", follow_redirects=False)
+    assert response.status_code == 400
+
+
+def test_send_email_rejects_already_sent_message(client):
+    from unittest.mock import MagicMock
+
+    db = SessionLocal()
+    contact = _create_contact(db)
+    contact_id = contact.id
+    db.close()
+    _generate_drafts_for(client, contact_id)
+    message_id = _email_message_id(contact_id)
+
+    with patch("app.routes.outreach.SMTPEmailClient") as mock_smtp_cls:
+        mock_smtp_cls.return_value = MagicMock()
+        client.post(f"/outreach/{message_id}/send-email", follow_redirects=False)
+
+    response = client.post(f"/outreach/{message_id}/send-email", follow_redirects=False)
+    assert response.status_code == 400
+
+
+def test_send_email_rejects_contact_with_no_email(client):
+    db = SessionLocal()
+    contact = _create_contact(db, email=None)
+    contact_id = contact.id
+    db.close()
+    _generate_drafts_for(client, contact_id)
+    message_id = _email_message_id(contact_id)
+
+    response = client.post(f"/outreach/{message_id}/send-email", follow_redirects=False)
+    assert response.status_code == 400
+
+
+@patch("app.routes.outreach.SMTPEmailClient")
+def test_send_email_blocked_when_daily_cap_exhausted(mock_smtp_cls, client):
+    from datetime import date
+
+    from app.config import settings
+    from app.models import EmailSendUsage
+
+    db = SessionLocal()
+    contact = _create_contact(db)
+    contact_id = contact.id
+    db.add(EmailSendUsage(used=settings.daily_email_send_limit, period_start=date.today()))
+    db.commit()
+    db.close()
+    _generate_drafts_for(client, contact_id)
+    message_id = _email_message_id(contact_id)
+
+    response = client.post(f"/outreach/{message_id}/send-email", follow_redirects=False)
+
+    assert response.status_code == 429
+    mock_smtp_cls.assert_not_called()
+
+
+def test_mark_sent_rejects_email_channel_message(client):
+    from app.db import SessionLocal
+    from app.models import OutreachChannel, OutreachMessage
+
+    db = SessionLocal()
+    contact = _create_contact(db)
+    contact_id = contact.id
+    db.close()
+    _generate_drafts_for(client, contact_id)
+
+    db = SessionLocal()
+    email_message = (
+        db.query(OutreachMessage)
+        .filter_by(contact_id=contact_id, channel=OutreachChannel.email)
+        .first()
+    )
+    message_id = email_message.id
+    db.close()
+
+    response = client.post(f"/outreach/{message_id}/mark-sent", follow_redirects=False)
+    assert response.status_code == 400

@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 import anthropic
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
@@ -9,9 +9,19 @@ from sqlalchemy.orm import Session
 
 from app.business_days import business_days_from
 from app.config import settings
+from app.credit_tracker import CreditTracker
 from app.db import get_db
 from app.drafting import DraftingError, draft_email, draft_email_subject, draft_linkedin_note
-from app.models import Contact, Event, OutreachChannel, OutreachMessage, OutreachStatus, User
+from app.email_client import EmailSendError, SMTPEmailClient
+from app.models import (
+    Contact,
+    Event,
+    EmailSendUsage,
+    OutreachChannel,
+    OutreachMessage,
+    OutreachStatus,
+    User,
+)
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
@@ -23,6 +33,8 @@ VALID_TRANSITIONS = {
     OutreachStatus.sent: {OutreachStatus.replied, OutreachStatus.no_response},
     OutreachStatus.replied: {OutreachStatus.interview, OutreachStatus.rejected},
 }
+
+EMAIL_DAILY_PERIOD_DAYS = 1
 
 
 def _profile_summary(profile) -> str:
@@ -36,6 +48,16 @@ def _profile_summary(profile) -> str:
 
 def _log_event(db: Session, contact_id: int, event_type: str, note: str) -> None:
     db.add(Event(contact_id=contact_id, type=event_type, note=note, timestamp=datetime.utcnow()))
+
+
+def _load_email_usage(db: Session) -> EmailSendUsage:
+    usage = db.query(EmailSendUsage).first()
+    if usage is None:
+        usage = EmailSendUsage(used=0, period_start=date.today())
+        db.add(usage)
+        db.commit()
+        db.refresh(usage)
+    return usage
 
 
 @router.post("/outreach/generate/{contact_id}")
@@ -161,6 +183,12 @@ def mark_sent(message_id: int, db: Session = Depends(get_db)):
     if message is None:
         raise HTTPException(status_code=404, detail="Message not found")
 
+    if message.channel != OutreachChannel.linkedin:
+        raise HTTPException(
+            status_code=400,
+            detail="Email messages must be sent via Send Email, not marked as sent manually.",
+        )
+
     old_status = message.status
     if OutreachStatus.sent not in VALID_TRANSITIONS.get(old_status, set()):
         raise HTTPException(
@@ -208,6 +236,82 @@ def update_status(message_id: int, status: str = Form(...), db: Session = Depend
     _log_event(
         db, message.contact_id, new_status.value, f"{old_status.value} -> {new_status.value}"
     )
+    db.commit()
+
+    return RedirectResponse(url="/outreach", status_code=303)
+
+
+@router.post("/outreach/{message_id}/send-email")
+def send_email(message_id: int, db: Session = Depends(get_db)):
+    message = db.query(OutreachMessage).filter_by(id=message_id).first()
+    if message is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    if message.channel != OutreachChannel.email:
+        raise HTTPException(
+            status_code=400, detail="This action is only available for email messages."
+        )
+
+    if message.status not in {OutreachStatus.drafted, OutreachStatus.failed}:
+        raise HTTPException(
+            status_code=400, detail=f"Cannot send from status {message.status.value}."
+        )
+
+    if not message.contact.email:
+        raise HTTPException(status_code=400, detail="This contact has no email address on file.")
+
+    usage = _load_email_usage(db)
+    tracker = CreditTracker(
+        limit=settings.daily_email_send_limit,
+        used=usage.used,
+        period_start=usage.period_start,
+    )
+    tracker.reset_if_new_period(today=date.today(), period_length_days=EMAIL_DAILY_PERIOD_DAYS)
+
+    if not tracker.can_spend(1):
+        resets_on = tracker.period_start + timedelta(days=EMAIL_DAILY_PERIOD_DAYS)
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"Daily email send limit reached. "
+                f"{tracker.remaining()} remaining. Resets on {resets_on}."
+            ),
+        )
+
+    old_status = message.status
+    email_client = SMTPEmailClient(
+        host=settings.smtp_host,
+        port=settings.smtp_port,
+        username=settings.smtp_username,
+        password=settings.smtp_password,
+        from_email=settings.smtp_from_email,
+    )
+
+    try:
+        email_client.send(message.contact.email, message.subject or "", message.draft_text)
+    except EmailSendError as e:
+        message.status = OutreachStatus.failed
+        message.error_message = str(e)
+        _log_event(
+            db,
+            message.contact_id,
+            OutreachStatus.failed.value,
+            f"{old_status.value} -> failed: {e}",
+        )
+        db.commit()
+        return RedirectResponse(url="/outreach", status_code=303)
+
+    message.status = OutreachStatus.sent
+    message.sent_at = datetime.utcnow()
+    follow_up_date = business_days_from(message.sent_at.date(), settings.follow_up_business_days)
+    message.follow_up_due_at = datetime.combine(follow_up_date, message.sent_at.time())
+    message.error_message = None
+    _log_event(db, message.contact_id, OutreachStatus.sent.value, f"{old_status.value} -> sent")
+
+    tracker.spend(1)
+    usage.used = tracker.used
+    usage.period_start = tracker.period_start
+
     db.commit()
 
     return RedirectResponse(url="/outreach", status_code=303)

@@ -102,3 +102,10 @@ class DiscoveryUsage(Base):
     id = Column(Integer, primary_key=True)
     used = Column(Integer, default=0)
     period_start = Column(Date)
+
+
+class EmailSendUsage(Base):
+    __tablename__ = "email_send_usage"
+    id = Column(Integer, primary_key=True)
+    used = Column(Integer, default=0)
+    period_start = Column(Date)
