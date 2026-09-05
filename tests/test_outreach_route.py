@@ -1,7 +1,8 @@
 import json
 from unittest.mock import MagicMock, patch
 
-from app.models import Company, Contact, Profile, User
+from app.drafting import DraftingError
+from app.models import Company, Contact, OutreachMessage, Profile, User
 
 
 def _create_contact(db):
@@ -73,6 +74,28 @@ def test_generate_drafts_creates_two_messages(mock_anthropic_cls, client):
 
     outreach_response = client.get("/outreach")
     assert "Jane Doe" in outreach_response.text
+
+
+@patch("app.routes.outreach.draft_linkedin_note", side_effect=DraftingError("empty response"))
+@patch("app.routes.outreach.anthropic.Anthropic")
+def test_generate_drafts_502_on_drafting_error(mock_anthropic_cls, mock_draft_linkedin, client):
+    from app.db import SessionLocal
+
+    db = SessionLocal()
+    contact = _create_contact(db)
+    contact_id = contact.id
+    db.close()
+
+    mock_anthropic_cls.return_value = _mock_anthropic_returning("Hi Jane, ...")
+
+    response = client.post(f"/outreach/generate/{contact_id}")
+
+    assert response.status_code == 502
+
+    db = SessionLocal()
+    messages = db.query(OutreachMessage).filter_by(contact_id=contact_id).all()
+    db.close()
+    assert messages == []
 
 
 def test_generate_drafts_404_for_unknown_contact(client):

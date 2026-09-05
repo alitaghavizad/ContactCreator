@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db import get_db
-from app.drafting import draft_email, draft_linkedin_note
+from app.drafting import DraftingError, draft_email, draft_linkedin_note
 from app.models import Contact, OutreachChannel, OutreachMessage, OutreachStatus, User
 
 router = APIRouter()
@@ -38,22 +38,27 @@ def generate_drafts(contact_id: int, db: Session = Depends(get_db)):
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
     company_name = contact.company.name if contact.company else "their company"
 
-    linkedin_text = draft_linkedin_note(
-        profile_summary=summary,
-        contact_name=contact.name,
-        contact_title=contact.title or "",
-        company_name=company_name,
-        client=client,
-        model=settings.claude_model,
-    )
-    email_text = draft_email(
-        profile_summary=summary,
-        contact_name=contact.name,
-        contact_title=contact.title or "",
-        company_name=company_name,
-        client=client,
-        model=settings.claude_model,
-    )
+    try:
+        linkedin_text = draft_linkedin_note(
+            profile_summary=summary,
+            contact_name=contact.name,
+            contact_title=contact.title or "",
+            company_name=company_name,
+            client=client,
+            model=settings.claude_model,
+        )
+        email_text = draft_email(
+            profile_summary=summary,
+            contact_name=contact.name,
+            contact_title=contact.title or "",
+            company_name=company_name,
+            client=client,
+            model=settings.claude_model,
+        )
+    except DraftingError:
+        raise HTTPException(
+            status_code=502, detail="Could not generate outreach drafts. Please try again."
+        )
 
     db.add(
         OutreachMessage(
