@@ -60,6 +60,42 @@ def test_discover_contacts_creates_company_and_contact(mock_apollo_cls, client):
     assert "Example Bank" in list_response.text
 
 
+@patch("app.routes.discovery.ApolloClient")
+def test_discover_contacts_dedupes_company_and_contact_on_repeat(mock_apollo_cls, client):
+    from app.db import SessionLocal
+    from app.models import Company, Contact
+
+    db = SessionLocal()
+    _create_profile(db)
+    db.close()
+
+    mock_apollo = MagicMock()
+    mock_apollo.search_people.return_value = [
+        ApolloPerson(
+            name="Jane Doe",
+            title="Engineering Manager",
+            company_name="Example Bank",
+            company_domain="example.com",
+            linkedin_url="https://linkedin.com/in/janedoe",
+            email="jane@example.com",
+        )
+    ]
+    mock_apollo_cls.return_value = mock_apollo
+
+    first_response = client.post("/contacts/discover")
+    assert first_response.status_code == 200
+    assert first_response.json()["discovered"] == 1
+
+    second_response = client.post("/contacts/discover")
+    assert second_response.status_code == 200
+    assert second_response.json()["discovered"] == 1
+
+    db = SessionLocal()
+    assert db.query(Company).count() == 1
+    assert db.query(Contact).count() == 1
+    db.close()
+
+
 def test_discover_contacts_requires_profile(client):
     response = client.post("/contacts/discover")
     assert response.status_code == 400
