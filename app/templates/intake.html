@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>ContactCreator - Intake</title>
+</head>
+<body>
+    <h1>Tell ContactCreator about you</h1>
+    <form action="/intake" method="post" enctype="multipart/form-data">
+        <label for="cv_file">CV (.txt file):</label><br>
+        <input type="file" id="cv_file" name="cv_file" accept=".txt" required><br><br>
+
+        <label for="target_roles">Target roles (comma-separated):</label><br>
+        <input type="text" id="target_roles" name="target_roles" placeholder="Backend Engineer, AI Automation Engineer" required><br><br>
+
+        <label for="target_locations">Target locations:</label><br>
+        <input type="text" id="target_locations" name="target_locations" placeholder="Yerevan, EU remote" required><br><br>
+
+        <label for="domains">Domain expertise:</label><br>
+        <input type="text" id="domains" name="domains" placeholder="banking, call-center" required><br><br>
+
+        <label for="seniority">Seniority:</label><br>
+        <select id="seniority" name="seniority">
+            <option value="junior">Junior</option>
+            <option value="mid" selected>Mid</option>
+            <option value="senior">Senior</option>
+            <option value="lead">Lead</option>
+        </select><br><br>
+
+        <label for="tone">Outreach tone:</label><br>
+        <select id="tone" name="tone">
+            <option value="formal">Formal</option>
+            <option value="professional" selected>Professional</option>
+            <option value="casual">Casual</option>
+        </select><br><br>
+
+        <button type="submit">Save profile</button>
+    </form>
+</body>
+</html>
