@@ -15,3 +15,7 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# Worktrees (scratch, not part of the repo)
+.worktrees/
+.superpowers/
