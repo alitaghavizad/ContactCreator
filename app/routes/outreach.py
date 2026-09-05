@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.business_days import business_days_from
 from app.config import settings
 from app.db import get_db
-from app.drafting import DraftingError, draft_email, draft_linkedin_note
+from app.drafting import DraftingError, draft_email, draft_email_subject, draft_linkedin_note
 from app.models import Contact, Event, OutreachChannel, OutreachMessage, OutreachStatus, User
 
 router = APIRouter()
@@ -69,6 +69,14 @@ def generate_drafts(contact_id: int, db: Session = Depends(get_db)):
             client=client,
             model=settings.claude_model,
         )
+        email_subject = draft_email_subject(
+            profile_summary=summary,
+            contact_name=contact.name,
+            contact_title=contact.title or "",
+            company_name=company_name,
+            client=client,
+            model=settings.claude_model,
+        )
     except DraftingError:
         raise HTTPException(
             status_code=502, detail="Could not generate outreach drafts. Please try again."
@@ -87,6 +95,7 @@ def generate_drafts(contact_id: int, db: Session = Depends(get_db)):
             contact_id=contact.id,
             channel=OutreachChannel.email,
             draft_text=email_text,
+            subject=email_subject,
             status=OutreachStatus.drafted,
         )
     )

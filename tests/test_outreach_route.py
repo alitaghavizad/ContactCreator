@@ -86,8 +86,37 @@ def test_generate_drafts_creates_two_messages(mock_anthropic_cls, client):
     db.close()
     assert channels == ["email", "linkedin"]
 
+    email_message = next(m for m in messages if m.channel.value == "email")
+    linkedin_message = next(m for m in messages if m.channel.value == "linkedin")
+    assert email_message.subject == "Hi Jane, ..."
+    assert linkedin_message.subject is None
+
     outreach_response = client.get("/outreach")
     assert "Jane Doe" in outreach_response.text
+
+
+@patch("app.routes.outreach.draft_email_subject", side_effect=DraftingError("empty response"))
+@patch("app.routes.outreach.anthropic.Anthropic")
+def test_generate_drafts_502_on_subject_drafting_error(
+    mock_anthropic_cls, mock_draft_subject, client
+):
+    from app.db import SessionLocal
+
+    db = SessionLocal()
+    contact = _create_contact(db)
+    contact_id = contact.id
+    db.close()
+
+    mock_anthropic_cls.return_value = _mock_anthropic_returning("Hi Jane, ...")
+
+    response = client.post(f"/outreach/generate/{contact_id}")
+
+    assert response.status_code == 502
+
+    db = SessionLocal()
+    messages = db.query(OutreachMessage).filter_by(contact_id=contact_id).all()
+    db.close()
+    assert messages == []
 
 
 @patch("app.routes.outreach.draft_linkedin_note", side_effect=DraftingError("empty response"))

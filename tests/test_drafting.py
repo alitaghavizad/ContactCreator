@@ -2,7 +2,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.drafting import LINKEDIN_CHAR_LIMIT, DraftingError, draft_email, draft_linkedin_note
+from app.drafting import (
+    LINKEDIN_CHAR_LIMIT,
+    DraftingError,
+    draft_email,
+    draft_email_subject,
+    draft_linkedin_note,
+)
 
 
 def _text_block(text: str):
@@ -213,3 +219,50 @@ def test_draft_email_raises_on_empty_content():
         )
 
     assert "empty response" in str(exc_info.value)
+
+
+def test_draft_email_subject_returns_stripped_text():
+    mock_client = _mock_client("  Backend engineer with banking domain background  ")
+
+    subject = draft_email_subject(
+        profile_summary="5 years Java, banking domain expertise",
+        contact_name="Jane Doe",
+        contact_title="Engineering Manager",
+        company_name="Example Bank",
+        client=mock_client,
+        model="claude-sonnet-5",
+    )
+
+    assert subject == "Backend engineer with banking domain background"
+    mock_client.messages.create.assert_called_once()
+
+
+def test_draft_email_subject_skips_non_text_content_blocks():
+    mock_client = _mock_client_with_blocks(
+        [_thinking_block(), _text_block("Quick question about your platform team")]
+    )
+
+    subject = draft_email_subject(
+        profile_summary="summary",
+        contact_name="Jane",
+        contact_title="Manager",
+        company_name="Example Bank",
+        client=mock_client,
+        model="claude-sonnet-5",
+    )
+
+    assert subject == "Quick question about your platform team"
+
+
+def test_draft_email_subject_raises_on_empty_content():
+    mock_client = _mock_client_with_blocks([])
+
+    with pytest.raises(DraftingError):
+        draft_email_subject(
+            profile_summary="summary",
+            contact_name="Jane",
+            contact_title="Manager",
+            company_name="Example Bank",
+            client=mock_client,
+            model="claude-sonnet-5",
+        )

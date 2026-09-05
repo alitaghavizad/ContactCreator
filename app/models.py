@@ -79,9 +79,11 @@ class OutreachMessage(Base):
     contact_id = Column(Integer, ForeignKey("contacts.id"), nullable=False)
     channel = Column(SAEnum(OutreachChannel), nullable=False)
     draft_text = Column(Text, nullable=False)
+    subject = Column(Text, nullable=True)
     status = Column(SAEnum(OutreachStatus), default=OutreachStatus.drafted)
     sent_at = Column(DateTime, nullable=True)
     follow_up_due_at = Column(DateTime, nullable=True)
+    error_message = Column(Text, nullable=True)
 
     contact = relationship("Contact")
 
