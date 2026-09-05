@@ -3,6 +3,11 @@ from dataclasses import dataclass, field
 
 import anthropic
 
+
+class CVParseError(Exception):
+    """Raised when Claude's response cannot be parsed as valid JSON."""
+    pass
+
 CV_PARSE_SYSTEM_PROMPT = """You are a resume-parsing assistant. Read the candidate's CV \
 and the answers they gave to a short intake questionnaire, then return ONLY a JSON object \
 (no prose, no markdown fences) with these exact keys:
@@ -49,7 +54,10 @@ def parse_cv(
         ],
     )
     raw_text = message.content[0].text
-    data = json.loads(raw_text)
+    try:
+        data = json.loads(raw_text)
+    except json.JSONDecodeError as e:
+        raise CVParseError(f"Claude did not return valid JSON: {raw_text!r}") from e
     return StructuredProfile(
         skills=data.get("skills", []),
         years_experience=int(data.get("years_experience", 0)),

@@ -1,7 +1,9 @@
 import json
 from unittest.mock import MagicMock
 
-from app.cv_parser import StructuredProfile, parse_cv
+import pytest
+
+from app.cv_parser import CVParseError, StructuredProfile, parse_cv
 
 
 def _mock_anthropic_client(payload: dict):
@@ -57,3 +59,24 @@ def test_parse_cv_defaults_missing_fields():
     assert profile.years_experience == 0
     assert profile.seniority == "mid"
     assert profile.tone == "professional"
+
+
+def test_parse_cv_raises_cvparse_error_on_invalid_json():
+    """Verify CVParseError is raised when Claude returns non-JSON text."""
+    mock_client = MagicMock()
+    mock_content_block = MagicMock()
+    # Simulate Claude returning text with JSON embedded but not parseable as-is
+    mock_content_block.text = 'Sure! Here\'s the profile: {"skills": ["Java"]}'
+    mock_message = MagicMock()
+    mock_message.content = [mock_content_block]
+    mock_client.messages.create.return_value = mock_message
+
+    with pytest.raises(CVParseError) as exc_info:
+        parse_cv(
+            cv_text="5 years Java developer...",
+            questionnaire_answers="",
+            client=mock_client,
+            model="claude-sonnet-5",
+        )
+
+    assert "Claude did not return valid JSON" in str(exc_info.value)
