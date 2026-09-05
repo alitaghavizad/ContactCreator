@@ -6,6 +6,47 @@
 </head>
 <body>
     <h1>Outreach Queue</h1>
+
+    <p>Contacted: {{ contacted_count }} &rarr; Replied: {{ replied_count }} &rarr; Interview: {{ interview_count }}</p>
+
+    <h2>Follow-ups due</h2>
+    {% for message in follow_ups_due %}
+    <div style="border:1px solid #e0a000; padding:10px; margin-bottom:10px;">
+        <p><strong>{{ message.contact.name }}</strong> ({{ message.channel.value }}) &mdash; {{ message.contact.title }} at {{ message.contact.company.name if message.contact.company else "" }}</p>
+        <textarea readonly rows="6" cols="60">{{ message.draft_text }}</textarea><br>
+        <form action="/outreach/{{ message.id }}/status" method="post" style="display:inline;">
+            <input type="hidden" name="status" value="replied">
+            <button type="submit">Mark Replied</button>
+        </form>
+        <form action="/outreach/{{ message.id }}/status" method="post" style="display:inline;">
+            <input type="hidden" name="status" value="no_response">
+            <button type="submit">Mark No Response</button>
+        </form>
+    </div>
+    {% endfor %}
+    {% if not follow_ups_due %}
+    <p>No follow-ups due right now.</p>
+    {% endif %}
+
+    <h2>Replied &mdash; awaiting outcome</h2>
+    {% for message in replied_awaiting_outcome %}
+    <div style="border:1px solid #2080e0; padding:10px; margin-bottom:10px;">
+        <p><strong>{{ message.contact.name }}</strong> ({{ message.channel.value }}) &mdash; {{ message.contact.title }} at {{ message.contact.company.name if message.contact.company else "" }}</p>
+        <form action="/outreach/{{ message.id }}/status" method="post" style="display:inline;">
+            <input type="hidden" name="status" value="interview">
+            <button type="submit">Mark Interview</button>
+        </form>
+        <form action="/outreach/{{ message.id }}/status" method="post" style="display:inline;">
+            <input type="hidden" name="status" value="rejected">
+            <button type="submit">Mark Rejected</button>
+        </form>
+    </div>
+    {% endfor %}
+    {% if not replied_awaiting_outcome %}
+    <p>No replies awaiting an outcome.</p>
+    {% endif %}
+
+    <h2>Drafts awaiting review</h2>
     {% for message in messages %}
     <div style="border:1px solid #ccc; padding:10px; margin-bottom:10px;">
         <p><strong>{{ message.contact.name }}</strong> ({{ message.channel.value }}) &mdash; {{ message.contact.title }} at {{ message.contact.company.name if message.contact.company else "" }}</p>

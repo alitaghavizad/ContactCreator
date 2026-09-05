@@ -316,3 +316,110 @@ def test_update_status_404_for_unknown_message(client):
         "/outreach/9999/status", data={"status": "replied"}, follow_redirects=False
     )
     assert response.status_code == 404
+
+
+def test_outreach_page_shows_funnel_counts(client):
+    from datetime import datetime, timedelta
+
+    from app.db import SessionLocal
+    from app.models import OutreachChannel, OutreachMessage, OutreachStatus
+
+    db = SessionLocal()
+    contact = _create_contact(db)
+    db.add(
+        OutreachMessage(
+            contact_id=contact.id,
+            channel=OutreachChannel.linkedin,
+            draft_text="a",
+            status=OutreachStatus.sent,
+            sent_at=datetime.utcnow(),
+            follow_up_due_at=datetime.utcnow() + timedelta(days=10),
+        )
+    )
+    db.add(
+        OutreachMessage(
+            contact_id=contact.id,
+            channel=OutreachChannel.email,
+            draft_text="b",
+            status=OutreachStatus.replied,
+        )
+    )
+    db.add(
+        OutreachMessage(
+            contact_id=contact.id,
+            channel=OutreachChannel.email,
+            draft_text="c",
+            status=OutreachStatus.interview,
+        )
+    )
+    db.commit()
+    db.close()
+
+    response = client.get("/outreach")
+
+    assert response.status_code == 200
+    # Contacted counts every sent-or-later message: sent + replied + interview = 3.
+    assert "Contacted: 3" in response.text
+    # Replied counts replied + interview = 2.
+    assert "Replied: 2" in response.text
+    assert "Interview: 1" in response.text
+
+
+def test_outreach_page_shows_follow_ups_due_only_when_overdue(client):
+    from datetime import datetime, timedelta
+
+    from app.db import SessionLocal
+    from app.models import OutreachChannel, OutreachMessage, OutreachStatus
+
+    db = SessionLocal()
+    contact = _create_contact(db)
+    db.add(
+        OutreachMessage(
+            contact_id=contact.id,
+            channel=OutreachChannel.linkedin,
+            draft_text="overdue one",
+            status=OutreachStatus.sent,
+            sent_at=datetime.utcnow() - timedelta(days=20),
+            follow_up_due_at=datetime.utcnow() - timedelta(days=1),
+        )
+    )
+    db.add(
+        OutreachMessage(
+            contact_id=contact.id,
+            channel=OutreachChannel.email,
+            draft_text="not due yet",
+            status=OutreachStatus.sent,
+            sent_at=datetime.utcnow(),
+            follow_up_due_at=datetime.utcnow() + timedelta(days=10),
+        )
+    )
+    db.commit()
+    db.close()
+
+    response = client.get("/outreach")
+
+    assert "overdue one" in response.text
+    assert "not due yet" not in response.text
+
+
+def test_outreach_page_shows_replied_awaiting_outcome(client):
+    from app.db import SessionLocal
+    from app.models import OutreachChannel, OutreachMessage, OutreachStatus
+
+    db = SessionLocal()
+    contact = _create_contact(db)
+    message = OutreachMessage(
+        contact_id=contact.id,
+        channel=OutreachChannel.linkedin,
+        draft_text="a",
+        status=OutreachStatus.replied,
+    )
+    db.add(message)
+    db.commit()
+    db.refresh(message)
+    message_id = message.id
+    db.close()
+
+    response = client.get("/outreach")
+
+    assert f"/outreach/{message_id}/status" in response.text

@@ -97,10 +97,52 @@ def generate_drafts(contact_id: int, db: Session = Depends(get_db)):
 
 @router.get("/outreach")
 def list_outreach(request: Request, db: Session = Depends(get_db)):
-    messages = (
+    drafted_messages = (
         db.query(OutreachMessage).filter(OutreachMessage.status == OutreachStatus.drafted).all()
     )
-    return templates.TemplateResponse("outreach.html", {"request": request, "messages": messages})
+    follow_ups_due = (
+        db.query(OutreachMessage)
+        .filter(
+            OutreachMessage.status == OutreachStatus.sent,
+            OutreachMessage.follow_up_due_at <= datetime.utcnow(),
+        )
+        .all()
+    )
+    replied_awaiting_outcome = (
+        db.query(OutreachMessage).filter(OutreachMessage.status == OutreachStatus.replied).all()
+    )
+
+    contacted_statuses = [
+        OutreachStatus.sent,
+        OutreachStatus.replied,
+        OutreachStatus.interview,
+        OutreachStatus.rejected,
+        OutreachStatus.no_response,
+    ]
+    replied_statuses = [OutreachStatus.replied, OutreachStatus.interview, OutreachStatus.rejected]
+
+    contacted_count = (
+        db.query(OutreachMessage).filter(OutreachMessage.status.in_(contacted_statuses)).count()
+    )
+    replied_count = (
+        db.query(OutreachMessage).filter(OutreachMessage.status.in_(replied_statuses)).count()
+    )
+    interview_count = (
+        db.query(OutreachMessage).filter(OutreachMessage.status == OutreachStatus.interview).count()
+    )
+
+    return templates.TemplateResponse(
+        "outreach.html",
+        {
+            "request": request,
+            "messages": drafted_messages,
+            "follow_ups_due": follow_ups_due,
+            "replied_awaiting_outcome": replied_awaiting_outcome,
+            "contacted_count": contacted_count,
+            "replied_count": replied_count,
+            "interview_count": interview_count,
+        },
+    )
 
 
 @router.post("/outreach/{message_id}/mark-sent")
