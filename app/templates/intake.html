@@ -8,8 +8,8 @@
     {% include "_nav.html" %}
     <h1>Tell ContactCreator about you</h1>
     <form action="/intake" method="post" enctype="multipart/form-data">
-        <label for="cv_file">CV (.txt file):</label><br>
-        <input type="file" id="cv_file" name="cv_file" accept=".txt" required><br><br>
+        <label for="cv_file">CV (.txt or .pdf file):</label><br>
+        <input type="file" id="cv_file" name="cv_file" accept=".txt,.pdf" required><br><br>
 
         <label for="target_roles">Target roles (comma-separated):</label><br>
         <input type="text" id="target_roles" name="target_roles" placeholder="Backend Engineer, AI Automation Engineer" required><br><br>
