@@ -51,7 +51,7 @@ async def submit_intake(
     cv_bytes = await cv_file.read()
     if filename.endswith(".pdf"):
         try:
-            cv_text = extract_pdf_text(cv_bytes)
+            cv_text = await run_in_threadpool(extract_pdf_text, cv_bytes)
         except CVExtractionError as e:
             raise HTTPException(status_code=400, detail=str(e))
     else:

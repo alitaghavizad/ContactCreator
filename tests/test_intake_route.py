@@ -244,6 +244,70 @@ def test_submit_intake_does_not_block_event_loop(mock_parse_cv, client):
 
 @patch("app.routes.intake.extract_pdf_text")
 @patch("app.routes.intake.anthropic.Anthropic")
+def test_submit_intake_pdf_extraction_does_not_block_event_loop(mock_anthropic_cls, mock_extract_pdf_text, client):
+    """PDF text extraction must run in a threadpool, not on the event loop.
+
+    While /intake is waiting on extract_pdf_text, an unrelated request (/health) must
+    still be served promptly. If extract_pdf_text were awaited inline on the event
+    loop, /health could not even be dispatched until extraction returned.
+    """
+    extraction_delay = 1.0
+
+    def slow_extraction(cv_bytes):
+        time.sleep(extraction_delay)
+        return "5 years Java developer with banking domain experience."
+
+    mock_extract_pdf_text.side_effect = slow_extraction
+    _mock_claude_response(
+        mock_anthropic_cls,
+        '{"skills": ["Java"], "years_experience": 5, "domains": ["banking"], '
+        '"target_roles": ["Backend Engineer"], "target_locations": ["Yerevan"], '
+        '"seniority": "mid", "tone": "professional"}',
+    )
+
+    async def scenario():
+        from app.main import app
+
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+            started = time.monotonic()
+            intake_task = asyncio.create_task(
+                ac.post(
+                    "/intake",
+                    data={
+                        "target_roles": "Backend Engineer",
+                        "target_locations": "Yerevan",
+                        "domains": "banking",
+                        "seniority": "mid",
+                    },
+                    files={"cv_file": ("cv.pdf", io.BytesIO(b"%PDF-1.4 fake pdf"), "application/pdf")},
+                    follow_redirects=False,
+                )
+            )
+            # Give the intake request a moment to reach extract_pdf_text. If extraction
+            # runs on the event loop, this sleep itself cannot resume until it
+            # finishes, so elapsed time is measured from before the task start.
+            await asyncio.sleep(0.1)
+
+            health = await ac.get("/health")
+            health_elapsed = time.monotonic() - started
+
+            intake_response = await intake_task
+            return health, health_elapsed, intake_response
+
+    health, health_elapsed, intake_response = asyncio.run(scenario())
+
+    assert health.status_code == 200
+    # /health served long before the 1.0s extraction call finished.
+    assert health_elapsed < extraction_delay / 2, (
+        f"/health took {health_elapsed:.2f}s - the event loop was blocked by extract_pdf_text"
+    )
+    assert intake_response.status_code == 303
+    assert intake_response.headers["location"] == "/contacts"
+
+
+@patch("app.routes.intake.extract_pdf_text")
+@patch("app.routes.intake.anthropic.Anthropic")
 def test_submit_intake_accepts_pdf_file(mock_anthropic_cls, mock_extract_pdf_text, client):
     mock_extract_pdf_text.return_value = "5 years Java developer with banking domain experience."
     _mock_claude_response(
