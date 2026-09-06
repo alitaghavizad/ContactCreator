@@ -1,7 +1,7 @@
 from datetime import date, timedelta
 from unittest.mock import MagicMock, patch
 
-from app.hunter_client import HunterPerson
+from app.hunter_client import HunterAPIError, HunterPerson
 
 
 @patch("app.routes.discovery.HunterClient")
@@ -216,4 +216,26 @@ def test_list_contacts_shows_used_searches_within_period(client):
     db = SessionLocal()
     usage = db.query(DiscoveryUsage).first()
     assert usage.used == 10
+    db.close()
+
+
+@patch("app.routes.discovery.HunterClient")
+def test_discover_contacts_returns_502_on_hunter_api_error(mock_hunter_cls, client):
+    from app.db import SessionLocal
+    from app.models import Company, Contact
+
+    mock_hunter = MagicMock()
+    mock_hunter.domain_search.side_effect = HunterAPIError("Hunter.io returned an error: 401")
+    mock_hunter_cls.return_value = mock_hunter
+
+    response = client.post(
+        "/contacts/discover", data={"domain": "example.com"}, follow_redirects=False
+    )
+
+    assert response.status_code == 502
+    assert "Hunter.io" in response.json()["detail"]
+
+    db = SessionLocal()
+    assert db.query(Company).count() == 0
+    assert db.query(Contact).count() == 0
     db.close()

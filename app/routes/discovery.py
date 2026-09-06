@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.credit_tracker import CreditTracker
 from app.db import get_db
-from app.hunter_client import HunterClient
+from app.hunter_client import HunterAPIError, HunterClient
 from app.models import Company, Contact, DiscoveryUsage
 from app.routes.intake import get_or_create_default_user
 
@@ -85,7 +85,10 @@ def discover_contacts(domain: str = Form(...), db: Session = Depends(get_db)):
         )
 
     hunter_client = HunterClient(api_key=settings.hunter_api_key)
-    people = hunter_client.domain_search(domain, limit=RESULTS_PER_SEARCH)
+    try:
+        people = hunter_client.domain_search(domain, limit=RESULTS_PER_SEARCH)
+    except HunterAPIError as e:
+        raise HTTPException(status_code=502, detail=str(e))
 
     for person in people:
         company = None

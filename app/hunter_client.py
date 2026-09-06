@@ -6,6 +6,11 @@ import httpx
 HUNTER_DOMAIN_SEARCH_URL = "https://api.hunter.io/v2/domain-search"
 
 
+class HunterAPIError(Exception):
+    """Raised when a Hunter.io API call fails, whether from a bad response or a network error."""
+    pass
+
+
 @dataclass
 class HunterPerson:
     name: str
@@ -22,16 +27,21 @@ class HunterClient:
         self._http = http_client or httpx.Client(timeout=30.0)
 
     def domain_search(self, domain: str, limit: int = 25) -> list[HunterPerson]:
-        response = self._http.get(
-            HUNTER_DOMAIN_SEARCH_URL,
-            params={
-                "domain": domain,
-                "api_key": self._api_key,
-                "limit": limit,
-                "type": "personal",
-            },
-        )
-        response.raise_for_status()
+        try:
+            response = self._http.get(
+                HUNTER_DOMAIN_SEARCH_URL,
+                params={
+                    "domain": domain,
+                    "api_key": self._api_key,
+                    "limit": limit,
+                    "type": "personal",
+                },
+            )
+            response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            raise HunterAPIError(f"Hunter.io returned an error: {e}") from e
+        except httpx.RequestError as e:
+            raise HunterAPIError(f"Could not reach Hunter.io: {e}") from e
         data = response.json()
         result = data.get("data") or {}
         company_name = result.get("organization")
