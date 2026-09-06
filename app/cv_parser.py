@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 import anthropic
 from pypdf import PdfReader
-from pypdf.errors import PdfReadError
+from pypdf.errors import PyPdfError
 
 
 class CVParseError(Exception):
@@ -21,7 +21,7 @@ def extract_pdf_text(pdf_bytes: bytes) -> str:
     try:
         reader = PdfReader(io.BytesIO(pdf_bytes))
         page_texts = [page.extract_text() for page in reader.pages]
-    except PdfReadError as e:
+    except PyPdfError as e:
         raise CVExtractionError(
             "Could not read this PDF - it may be corrupted. Try exporting as .txt instead."
         ) from e

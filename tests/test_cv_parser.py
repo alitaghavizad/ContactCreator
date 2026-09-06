@@ -231,3 +231,22 @@ def test_extract_pdf_text_raises_on_corrupt_pdf():
         extract_pdf_text(b"%PDF-1.4 not a real pdf")
 
     assert "could not read" in str(exc_info.value).lower()
+
+
+def test_extract_pdf_text_raises_on_parse_error(monkeypatch):
+    from unittest.mock import MagicMock
+
+    import app.cv_parser as cv_parser_module
+    from pypdf.errors import ParseError
+
+    def mock_pdf_reader_raises_parse_error(_stream):
+        raise ParseError("simulated parse error")
+
+    monkeypatch.setattr(
+        cv_parser_module, "PdfReader", mock_pdf_reader_raises_parse_error
+    )
+
+    with pytest.raises(CVExtractionError) as exc_info:
+        extract_pdf_text(b"fake pdf bytes")
+
+    assert "could not read" in str(exc_info.value).lower()
