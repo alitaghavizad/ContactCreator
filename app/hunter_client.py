@@ -39,7 +39,9 @@ class HunterClient:
             )
             response.raise_for_status()
         except httpx.HTTPStatusError as e:
-            raise HunterAPIError(f"Hunter.io returned an error: {e}") from e
+            raise HunterAPIError(
+                f"Hunter.io returned an error: {e.response.status_code} {e.response.reason_phrase}"
+            ) from e
         except httpx.RequestError as e:
             raise HunterAPIError(f"Could not reach Hunter.io: {e}") from e
         data = response.json()

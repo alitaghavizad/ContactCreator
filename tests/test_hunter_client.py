@@ -70,8 +70,14 @@ def test_domain_search_raises_hunter_api_error_on_http_status_error():
     )
     client = HunterClient(api_key="bad-key", http_client=mock_http)
 
-    with pytest.raises(HunterAPIError):
+    with pytest.raises(HunterAPIError) as exc_info:
         client.domain_search("example.com")
+
+    error_message = str(exc_info.value)
+    # Verify API key does not leak into error message
+    assert "bad-key" not in error_message
+    # Verify status code is still present for diagnostics
+    assert "401" in error_message
 
 
 def test_domain_search_raises_hunter_api_error_on_request_error():
