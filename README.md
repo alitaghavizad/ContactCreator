@@ -19,7 +19,7 @@ Then start the app:
 docker compose up --build
 ```
 
-Visit `http://localhost:8000/intake`.
+Visit `http://localhost:8000/` for the overview, or `/intake` to set up your profile.
 
 ## Running the tests
 
@@ -34,6 +34,9 @@ pytest -v
 
 ## Using it
 
-1. **`/intake`** — upload a CV (`.txt` or `.pdf`) and answer a short questionnaire (target roles, locations, domains, seniority, tone). Claude parses it into a structured profile.
-2. **`/contacts`** — enter a company domain to discover people there via Hunter.io, then generate LinkedIn/email drafts for any contact.
-3. **`/outreach`** — review drafts, copy LinkedIn notes to send manually, send emails directly (subject to a daily send cap), and track replies/interviews/follow-ups due.
+1. **`/`** — see your network, outreach progress, recent activity, and next actions.
+2. **`/intake`** — upload a CV (`.txt` or `.pdf`) and answer a short questionnaire (target roles, locations, domains, seniority, tone). Claude parses it into a structured profile. Existing preferences are prefilled when updating your profile.
+3. **`/contacts`** — enter a company domain to discover people there via Hunter.io. Search or filter saved contacts, open their detail panels, and generate LinkedIn/email drafts.
+4. **`/outreach`** — edit and save drafts, copy LinkedIn notes to send manually, review and send emails (subject to a daily send cap), and track replies/interviews/follow-ups due. Sending an email or marking a LinkedIn note as sent preserves your current edits. Sent history cannot be edited.
+
+The UI uses local CSS, JavaScript, and SVG assets with no frontend build step. After changes to Python routes, restart the app service with `docker compose restart app`; templates and static assets are mounted from the project.

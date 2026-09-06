@@ -27,8 +27,14 @@ def get_or_create_default_user(db: Session) -> User:
 
 
 @router.get("/intake")
-def show_intake_form(request: Request):
-    return templates.TemplateResponse("intake.html", {"request": request})
+def show_intake_form(request: Request, db: Session = Depends(get_db)):
+    profile = db.query(Profile).first()
+    values = {}
+    if profile:
+        for field in ("target_roles", "target_locations", "domains"):
+            values[field] = ", ".join(json.loads(getattr(profile, field) or "[]"))
+        values.update(seniority=profile.seniority, tone=profile.tone)
+    return templates.TemplateResponse("intake.html", {"request": request, "profile": profile, "values": values})
 
 
 @router.post("/intake")

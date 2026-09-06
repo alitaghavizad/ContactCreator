@@ -196,7 +196,7 @@ def list_outreach(request: Request, db: Session = Depends(get_db)):
 
 
 @router.post("/outreach/{message_id}/mark-sent")
-def mark_sent(message_id: int, db: Session = Depends(get_db)):
+def mark_sent(message_id: int, draft_text: str | None = Form(None), db: Session = Depends(get_db)):
     message = db.query(OutreachMessage).filter_by(id=message_id).first()
     if message is None:
         raise HTTPException(status_code=404, detail="Message not found")
@@ -214,6 +214,8 @@ def mark_sent(message_id: int, db: Session = Depends(get_db)):
             detail=f"Cannot mark as sent from status {old_status.value}.",
         )
 
+    if draft_text is not None:
+        _apply_draft_edits(message, draft_text, None)
     message.status = OutreachStatus.sent
     message.sent_at = datetime.utcnow()
     follow_up_date = business_days_from(
@@ -260,7 +262,12 @@ def update_status(message_id: int, status: str = Form(...), db: Session = Depend
 
 
 @router.post("/outreach/{message_id}/send-email")
-def send_email(message_id: int, db: Session = Depends(get_db)):
+def send_email(
+    message_id: int,
+    draft_text: str | None = Form(None),
+    subject: str | None = Form(None),
+    db: Session = Depends(get_db),
+):
     message = db.query(OutreachMessage).filter_by(id=message_id).first()
     if message is None:
         raise HTTPException(status_code=404, detail="Message not found")
@@ -296,6 +303,8 @@ def send_email(message_id: int, db: Session = Depends(get_db)):
             ),
         )
 
+    if draft_text is not None:
+        _apply_draft_edits(message, draft_text, subject)
     old_status = message.status
     email_client = SMTPEmailClient(
         host=settings.smtp_host,
@@ -333,3 +342,30 @@ def send_email(message_id: int, db: Session = Depends(get_db)):
     db.commit()
 
     return RedirectResponse(url="/outreach", status_code=303)
+
+
+def _apply_draft_edits(message: OutreachMessage, draft_text: str, subject: str | None):
+    if not draft_text.strip():
+        raise HTTPException(status_code=400, detail="Write a message before saving or sending.")
+    if message.channel == OutreachChannel.linkedin and len(draft_text.strip()) > 300:
+        raise HTTPException(status_code=400, detail="LinkedIn notes must be 300 characters or fewer.")
+    if message.channel == OutreachChannel.email and subject is not None and ("\r" in subject or "\n" in subject):
+        raise HTTPException(status_code=400, detail="Keep the subject on a single line.")
+    message.draft_text = draft_text.strip()
+    if message.channel == OutreachChannel.email and subject is not None:
+        message.subject = subject.strip()
+
+
+@router.post("/outreach/{message_id}/edit")
+def edit_draft(
+    message_id: int, draft_text: str = Form(...), subject: str | None = Form(None),
+    db: Session = Depends(get_db),
+):
+    message = db.query(OutreachMessage).filter_by(id=message_id).first()
+    if message is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+    if message.status not in {OutreachStatus.drafted, OutreachStatus.failed}:
+        raise HTTPException(status_code=400, detail="Only unsent drafts can be edited.")
+    _apply_draft_edits(message, draft_text, subject)
+    db.commit()
+    return RedirectResponse(url="/outreach?saved=1", status_code=303)

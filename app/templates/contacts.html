@@ -1,46 +1,13 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>ContactCreator - Contacts</title>
-</head>
-<body>
-    {% include "_nav.html" %}
-    <h1>Contacts</h1>
-    <p>Hunter.io searches remaining this period: {{ searches_remaining }} / {{ searches_limit }}</p>
-    <form action="/contacts/discover" method="post">
-        <label for="domain">Company domain:</label>
-        <input type="text" id="domain" name="domain" placeholder="example.com" required>
-        <button type="submit">Find contacts at this company</button>
-    </form>
-    <table border="1" cellpadding="6">
-        <thead>
-            <tr>
-                <th>Name</th>
-                <th>Title</th>
-                <th>Company</th>
-                <th>LinkedIn</th>
-                <th>Email</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for contact in contacts %}
-            <tr>
-                <td>{{ contact.name }}</td>
-                <td>{{ contact.title }}</td>
-                <td>{{ contact.company.name if contact.company else "" }}</td>
-                <td><a href="{{ contact.linkedin_url }}">{{ contact.linkedin_url }}</a></td>
-                <td>{{ contact.email }}</td>
-                <td>
-                    <form action="/outreach/generate/{{ contact.id }}" method="post">
-                        <button type="submit">Generate drafts</button>
-                    </form>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    <p><a href="/outreach">Go to outreach queue</a></p>
-</body>
-</html>
+{% extends 'base.html' %}
+{% block title %}Contacts{% endblock %}{% block breadcrumb %}Contacts{% endblock %}
+{% block content %}
+<div class="page-heading"><div><div class="eyebrow">BUILD YOUR CIRCLE</div><h1>The right people. Real possibilities<span class="green">.</span></h1><p>Discover people at companies you’d love to be part of.</p></div><a href="#discover" class="button primary">{{ icon('plus',17) }} Find contacts</a></div>
+<section class="discovery-panel" id="discover"><div class="discovery-intro"><span class="icon-tile">{{ icon('building',22) }}</span><div><h2>Where would you like to work?</h2><p>Enter a company domain to find your next connection.</p></div></div><form action="/contacts/discover" method="post" data-async data-loading="Finding contacts…"><label class="sr-only" for="domain">Company domain</label><div class="discovery-input">{{ icon('search',18) }}<input type="text" id="domain" name="domain" placeholder="e.g. stripe.com" required><button class="button primary" type="submit">Find contacts {{ icon('arrow',16) }}</button></div><p class="quota">{{ icon('spark',13) }} {{ searches_remaining }} / {{ searches_limit }} company searches remaining this period <span>· Powered by Hunter.io</span></p></form></section>
+<section class="panel contacts-panel"><div class="panel-heading"><div class="inline-heading"><h2>All contacts</h2><span class="count-badge">{{ contacts|length }}</span></div><a class="text-link" href="/outreach">Open outreach {{ icon('arrow',16) }}</a></div>
+<div class="table-toolbar"><div class="filter-chips" role="group" aria-label="Filter contacts"><button type="button" class="filter-chip selected" data-filter="all" aria-pressed="true">Everyone</button><button type="button" class="filter-chip" data-filter="email" aria-pressed="false">Has email</button><button type="button" class="filter-chip" data-filter="linkedin" aria-pressed="false">Has LinkedIn</button></div><label class="search-input">{{ icon('search',16) }}<input id="contact-search" type="search" placeholder="Search people or companies…" aria-label="Search contacts"></label></div>
+{% if contacts %}<div class="table-scroll"><table class="contacts-table"><thead><tr><th scope="col">Name</th><th scope="col">Company</th><th scope="col">Email</th><th scope="col">Connect</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody>
+{% for contact in contacts %}<tr data-contact data-search="{{ contact.name }} {{ contact.title or '' }} {{ contact.company.name if contact.company else '' }} {{ contact.email or '' }}" data-email="{{ 'yes' if contact.email else 'no' }}" data-linkedin="{{ 'yes' if contact.linkedin_url and contact.linkedin_url.startswith(('https://', 'http://')) else 'no' }}"><td><button class="person-button" type="button" data-open="contact-{{ contact.id }}"><span class="avatar tint-{{ loop.index % 4 }}">{{ contact.name[:1]|upper }}</span><span><strong>{{ contact.name }}</strong><small>{{ contact.title or 'Role not available' }}</small></span></button></td><td><span class="company-name">{{ contact.company.name if contact.company else '—' }}</span><small>{{ contact.company.domain if contact.company and contact.company.domain else '' }}</small></td><td><span class="email-value">{% if contact.email %}<span class="tiny-dot"></span>{{ contact.email }}{% else %}<span class="muted">Not available</span>{% endif %}</span></td><td>{% if contact.linkedin_url and contact.linkedin_url.startswith(('https://', 'http://')) %}<a class="linkedin-link" href="{{ contact.linkedin_url }}" target="_blank" rel="noopener noreferrer" aria-label="Open {{ contact.name }} on LinkedIn">in {{ icon('up',12) }}</a>{% else %}<span class="muted">—</span>{% endif %}</td><td><form action="/outreach/generate/{{ contact.id }}" method="post" data-async data-loading="Drafting…"><button class="button small" type="submit">{{ icon('spark',15) }} Generate drafts</button></form></td></tr>{% endfor %}
+</tbody></table></div><div class="empty-state compact" id="no-results" hidden><h3>No matching contacts</h3><p>Try another name or company, or clear your filters.</p><button class="button" id="clear-filters" type="button">Clear filters</button></div><div class="table-footer"><span id="contact-count" aria-live="polite">Showing {{ contacts|length }} contacts</span><span>Every connection starts somewhere.</span></div>
+{% else %}<div class="empty-state"><span class="empty-icon">{{ icon('people',30) }}</span><h3>Meet your next opportunity</h3><p>Search a company domain above to discover people and start building your network.</p><a href="#domain" class="button">Find your first contacts {{ icon('arrow',16) }}</a></div>{% endif %}</section>
+{% for contact in contacts %}<dialog id="contact-{{ contact.id }}" class="contact-drawer" aria-labelledby="contact-title-{{ contact.id }}"><div class="dialog-heading"><span class="eyebrow">CONTACT DETAILS</span><button class="icon-button" data-close type="button" aria-label="Close contact details">{{ icon('close') }}</button></div><span class="avatar avatar-large tint-{{ loop.index % 4 }}">{{ contact.name[:1]|upper }}</span><h2 id="contact-title-{{ contact.id }}">{{ contact.name }}</h2><p>{{ contact.title or 'Role not available' }}</p><div class="detail-fields"><div><span>Company</span><strong>{{ contact.company.name if contact.company else 'Not available' }}</strong></div><div><span>Email</span><strong>{{ contact.email or 'Not available' }}</strong></div><div><span>Discovered through</span><strong>{{ contact.discovery_source|capitalize }}</strong></div></div>{% if contact.linkedin_url and contact.linkedin_url.startswith(('https://', 'http://')) %}<a class="button" href="{{ contact.linkedin_url }}" target="_blank" rel="noopener noreferrer">View LinkedIn profile {{ icon('up',16) }}</a>{% endif %}<div class="drawer-note">{{ icon('spark') }}<p>A specific introduction makes a difference. Generate a draft tailored to this person and your background.</p></div><form action="/outreach/generate/{{ contact.id }}" method="post" data-async data-loading="Writing your introduction…"><button class="button primary full-width" type="submit">{{ icon('spark',17) }} Generate drafts</button></form></dialog>{% endfor %}
+{% endblock %}

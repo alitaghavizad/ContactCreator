@@ -1,6 +1,7 @@
-<nav style="margin-bottom: 20px;">
-    <a href="/intake"><button type="button">Intake</button></a>
-    <a href="/contacts"><button type="button">Contacts</button></a>
-    <a href="/outreach"><button type="button">Outreach</button></a>
-</nav>
-<hr>
+<aside class="sidebar" id="sidebar">
+<a href="/" class="brand"><span class="brand-symbol">c<span></span></span><span>contact<span class="brand-light">creator</span></span></a>
+<div class="workspace-switch"><span class="workspace-mark">A</span><div><strong>Ali's workspace</strong><small>Personal</small></div><span class="workspace-chevron">⌄</span></div>
+<span class="nav-label">WORKSPACE</span><nav aria-label="Main navigation">
+{% for path, label, glyph in [('/', 'Overview', 'grid'), ('/contacts', 'Contacts', 'people'), ('/outreach', 'Outreach', 'mail'), ('/intake', 'My profile', 'user')] %}<a href="{{ path }}" class="nav-item {{ 'active' if request.url.path == path else '' }}" {% if request.url.path == path %}aria-current="page"{% endif %}>{{ icon(glyph, 19) }}<span>{{ label }}</span>{% if request.url.path == path %}<span class="nav-active-dot"></span>{% endif %}</a>{% endfor %}</nav>
+<div class="sidebar-bottom"><div class="sidebar-note">{{ icon('spark', 19) }}<strong>A little intention goes a long way.</strong><p>Make your next connection a meaningful one.</p></div><a href="/intake" class="user-menu"><span class="avatar">A</span><div><strong>Ali</strong><small>Your personal workspace</small></div>{{ icon('up', 15) }}</a></div>
+</aside>

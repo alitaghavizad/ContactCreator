@@ -1,91 +1,23 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>ContactCreator - Outreach Queue</title>
-</head>
-<body>
-    {% include "_nav.html" %}
-    <h1>Outreach Queue</h1>
-
-    <p>Contacted: {{ contacted_count }} &rarr; Replied: {{ replied_count }} &rarr; Interview: {{ interview_count }}</p>
-    <p>Emails sent today: {{ emails_sent_today }} / {{ daily_email_limit }}</p>
-
-    <h2>Follow-ups due</h2>
-    {% for message in follow_ups_due %}
-    <div style="border:1px solid #e0a000; padding:10px; margin-bottom:10px;">
-        <p><strong>{{ message.contact.name }}</strong> ({{ message.channel.value }}) &mdash; {{ message.contact.title }} at {{ message.contact.company.name if message.contact.company else "" }}</p>
-        <textarea readonly rows="6" cols="60">{{ message.draft_text }}</textarea><br>
-        <form action="/outreach/{{ message.id }}/status" method="post" style="display:inline;">
-            <input type="hidden" name="status" value="replied">
-            <button type="submit">Mark Replied</button>
-        </form>
-        <form action="/outreach/{{ message.id }}/status" method="post" style="display:inline;">
-            <input type="hidden" name="status" value="no_response">
-            <button type="submit">Mark No Response</button>
-        </form>
-    </div>
-    {% endfor %}
-    {% if not follow_ups_due %}
-    <p>No follow-ups due right now.</p>
-    {% endif %}
-
-    <h2>Replied &mdash; awaiting outcome</h2>
-    {% for message in replied_awaiting_outcome %}
-    <div style="border:1px solid #2080e0; padding:10px; margin-bottom:10px;">
-        <p><strong>{{ message.contact.name }}</strong> ({{ message.channel.value }}) &mdash; {{ message.contact.title }} at {{ message.contact.company.name if message.contact.company else "" }}</p>
-        <form action="/outreach/{{ message.id }}/status" method="post" style="display:inline;">
-            <input type="hidden" name="status" value="interview">
-            <button type="submit">Mark Interview</button>
-        </form>
-        <form action="/outreach/{{ message.id }}/status" method="post" style="display:inline;">
-            <input type="hidden" name="status" value="rejected">
-            <button type="submit">Mark Rejected</button>
-        </form>
-    </div>
-    {% endfor %}
-    {% if not replied_awaiting_outcome %}
-    <p>No replies awaiting an outcome.</p>
-    {% endif %}
-
-    <h2>Failed sends</h2>
-    {% for message in failed_messages %}
-    <div style="border:1px solid #d02020; padding:10px; margin-bottom:10px;">
-        <p><strong>{{ message.contact.name }}</strong> ({{ message.channel.value }}) &mdash; {{ message.contact.title }} at {{ message.contact.company.name if message.contact.company else "" }}</p>
-        <p style="color:#d02020;">Error: {{ message.error_message }}</p>
-        <textarea readonly rows="6" cols="60">{{ message.draft_text }}</textarea><br>
-        <form action="/outreach/{{ message.id }}/send-email" method="post" style="display:inline;">
-            <button type="submit">Retry Send</button>
-        </form>
-    </div>
-    {% endfor %}
-    {% if not failed_messages %}
-    <p>No failed sends.</p>
-    {% endif %}
-
-    <h2>Drafts awaiting review</h2>
-    {% for message in messages %}
-    <div style="border:1px solid #ccc; padding:10px; margin-bottom:10px;">
-        <p><strong>{{ message.contact.name }}</strong> ({{ message.channel.value }}) &mdash; {{ message.contact.title }} at {{ message.contact.company.name if message.contact.company else "" }}</p>
-        {% if message.channel.value == "email" and message.subject %}
-        <p>Subject: {{ message.subject }}</p>
-        {% endif %}
-        <textarea readonly rows="6" cols="60">{{ message.draft_text }}</textarea><br>
-        {% if message.channel.value == "linkedin" %}
-        <form action="/outreach/{{ message.id }}/mark-sent" method="post" style="display:inline;">
-            <button type="submit">Mark as sent</button>
-        </form>
-        {% elif message.contact.email %}
-        <form action="/outreach/{{ message.id }}/send-email" method="post" style="display:inline;">
-            <button type="submit">Send Email</button>
-        </form>
-        {% else %}
-        <p>No email on file.</p>
-        {% endif %}
-    </div>
-    {% endfor %}
-    {% if not messages %}
-    <p>No drafts waiting for review. Go to <a href="/contacts">Contacts</a> to discover people and generate drafts.</p>
-    {% endif %}
-</body>
-</html>
+{% extends 'base.html' %}
+{% block title %}Outreach{% endblock %}{% block breadcrumb %}Outreach{% endblock %}
+{% macro draft_card(message, failed=false) %}
+<article class="draft-card" id="message-{{ message.id }}"><div class="draft-heading"><span class="avatar tint-{{ message.contact.id % 4 }}">{{ message.contact.name[:1]|upper }}</span><div><h3>{{ message.contact.name }}</h3><p>{{ message.contact.title or 'Contact' }} · {{ message.contact.company.name if message.contact.company else '' }}</p></div><span class="badge {{ 'blue-badge' if message.channel.value == 'linkedin' else 'green-badge' }}">{% if message.channel.value == 'linkedin' %}<b>in</b> LinkedIn{% else %}{{ icon('mail',13) }} Email{% endif %}</span></div>
+{% if failed %}<div class="error-notice">{{ icon('info',16) }}<span>{{ message.error_message }}</span></div>{% endif %}
+<form action="/outreach/{{ message.id }}/edit" method="post" data-async data-editor data-loading="Saving draft…">
+{% if message.channel.value == 'email' %}<div class="editor-meta"><span>To</span><span>{{ message.contact.email or 'No email on file.' }}</span></div><div class="editor-meta"><label for="subject-{{ message.id }}">Subject</label><input id="subject-{{ message.id }}" name="subject" value="{{ message.subject or '' }}" aria-label="Subject for {{ message.contact.name }}"></div>{% endif %}
+<label class="sr-only" for="body-{{ message.id }}">{{ message.channel.value|capitalize }} message for {{ message.contact.name }}</label><textarea class="message-body" id="body-{{ message.id }}" name="draft_text" rows="{{ 5 if message.channel.value == 'linkedin' else 10 }}" {% if message.channel.value == 'linkedin' %}maxlength="300"{% endif %} required>{{ message.draft_text }}</textarea>
+<div class="editor-bottom"><span class="editor-state">{% if message.channel.value == 'linkedin' %}Copy to LinkedIn · <span data-char-count>{{ message.draft_text|length }}</span>/300 characters{% else %}Review every detail before sending{% endif %}</span><button type="button" class="copy-button" data-copy="body-{{ message.id }}">{{ icon('copy',14) }} Copy</button></div>
+<div class="draft-actions"><button class="button small" type="submit">Save changes</button>{% if message.channel.value == 'email' and message.contact.email %}<button class="button primary small" type="submit" formaction="/outreach/{{ message.id }}/send-email" data-send="{{ message.contact.email }}" data-loading="Sending…">{{ icon('send',14) }} {{ 'Retry Send' if failed else 'Send Email' }}</button>{% elif message.channel.value == 'email' %}<span class="muted">No email on file.</span>{% else %}<button class="button primary small" type="submit" formaction="/outreach/{{ message.id }}/mark-sent">{{ icon('check',15) }} Mark as sent</button>{% endif %}</div></form>
+</article>
+{% endmacro %}
+{% block content %}
+<div class="page-heading"><div><div class="eyebrow">TURN INTRODUCTIONS INTO CONVERSATIONS</div><h1>A thoughtful hello goes a long way<span class="green">.</span></h1><p>Review, make it yours, and take the next step.</p></div><a href="/contacts" class="button">{{ icon('people',17) }} Find more people</a></div>
+<div class="outreach-summary"><div class="summary-numbers"><span>Contacted: {{ contacted_count }}</span><span class="summary-arrow">→</span><span>Replied: {{ replied_count }}</span><span class="summary-arrow">→</span><span>Interview: {{ interview_count }}</span></div><span class="quota">{{ icon('mail',15) }} Emails sent today: {{ emails_sent_today }} / {{ daily_email_limit }}</span></div>
+<nav class="section-tabs" aria-label="Outreach sections"><a href="#drafts" class="selected">Drafts <span>{{ messages|length }}</span></a><a href="#follow-ups">Follow-ups <span>{{ follow_ups_due|length }}</span></a><a href="#replies">Replies <span>{{ replied_awaiting_outcome|length }}</span></a><a href="#failed">Failed <span>{{ failed_messages|length }}</span></a></nav>
+<section id="drafts" class="outreach-section"><div class="panel-heading"><div><h2>Drafts awaiting review</h2><p class="muted">A starting point, with room for your own voice.</p></div><span class="small-label">YOU’RE ALWAYS IN CONTROL</span></div><div class="draft-grid">{% for message in messages %}{{ draft_card(message) }}{% else %}<div class="panel empty-state"><span class="empty-icon">{{ icon('mail',28) }}</span><h3>A fresh page, a new connection</h3><p>No drafts waiting for review. Go to <a href="/contacts">Contacts</a> to discover people and generate drafts.</p><a href="/contacts" class="button primary">Explore contacts {{ icon('arrow',16) }}</a></div>{% endfor %}</div></section>
+<section id="follow-ups" class="outreach-section"><div class="panel-heading"><div><h2>Follow-ups due</h2><p class="muted">A gentle nudge can open the door.</p></div><span class="badge amber-badge">{{ icon('clock',13) }} {{ follow_ups_due|length }} due</span></div>
+{% for message in follow_ups_due %}<article class="panel follow-card"><div class="draft-heading"><span class="avatar">{{ message.contact.name[:1]|upper }}</span><div><h3>{{ message.contact.name }}</h3><p>{{ message.channel.value|capitalize }} · {{ message.contact.title or '' }} at {{ message.contact.company.name if message.contact.company else '' }}</p></div></div><details><summary>View sent message</summary><div class="sent-message">{{ message.draft_text }}</div></details><div class="button-row">{% for value, label in [('replied','Mark Replied'), ('no_response','Mark No Response')] %}<form action="/outreach/{{ message.id }}/status" method="post" data-async><input type="hidden" name="status" value="{{ value }}"><button class="button small {{ 'primary' if value == 'replied' else '' }}" type="submit">{{ label }}</button></form>{% endfor %}</div></article>{% else %}<div class="quiet-state">{{ icon('check',18) }}<span>No follow-ups due right now.</span></div>{% endfor %}</section>
+<section id="replies" class="outreach-section"><div class="panel-heading"><div><h2>Replied &mdash; awaiting outcome</h2><p class="muted">Keep track of where each conversation takes you.</p></div></div>
+{% for message in replied_awaiting_outcome %}<article class="panel follow-card"><div class="draft-heading"><span class="avatar">{{ message.contact.name[:1]|upper }}</span><div><h3>{{ message.contact.name }}</h3><p>{{ message.channel.value|capitalize }} · {{ message.contact.title or '' }} at {{ message.contact.company.name if message.contact.company else '' }}</p></div><span class="badge green-badge">Replied</span></div><div class="button-row">{% for value, label in [('interview','Mark Interview'), ('rejected','Mark Rejected')] %}<form action="/outreach/{{ message.id }}/status" method="post" data-async><input type="hidden" name="status" value="{{ value }}"><button class="button small {{ 'primary' if value == 'interview' else '' }}" type="submit">{{ label }}</button></form>{% endfor %}</div></article>{% else %}<div class="quiet-state">{{ icon('reply',18) }}<span>No replies awaiting an outcome.</span></div>{% endfor %}</section>
+<section id="failed" class="outreach-section"><div class="panel-heading"><h2>Failed sends</h2></div><div class="draft-grid">{% for message in failed_messages %}{{ draft_card(message, true) }}{% else %}<div class="quiet-state">{{ icon('check',18) }}<span>No failed sends.</span></div>{% endfor %}</div></section>
+{% endblock %}

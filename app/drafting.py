@@ -1,3 +1,5 @@
+import re
+
 import anthropic
 
 
@@ -30,7 +32,8 @@ no markdown."""
 EMAIL_SYSTEM_PROMPT = """You write short, specific cold outreach emails for a job seeker \
 reaching out to someone in their target industry. The email should be 3-5 short paragraphs, \
 reference something concrete about the candidate's background and the recipient's company, \
-and end with a clear, low-pressure call to action (e.g. a 15-minute chat). Return ONLY the \
+and end with a clear, low-pressure call to action (e.g. a 15-minute chat). The sender's \
+name is Ali. Sign off with Ali, never a placeholder such as [Your name]. Return ONLY the \
 email body text, no subject line, no markdown."""
 
 EMAIL_SUBJECT_SYSTEM_PROMPT = """You write short, specific subject lines for cold outreach \
@@ -99,7 +102,7 @@ def draft_email(
         raise DraftingError(f"Claude API request failed: {e}") from e
     if not message.content:
         raise DraftingError("Claude returned an empty response with no content blocks")
-    return _first_text_block(message).strip()
+    return re.sub(r"\[your name\]", "Ali", _first_text_block(message).strip(), flags=re.IGNORECASE)
 
 
 def draft_email_subject(

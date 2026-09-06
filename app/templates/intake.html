@@ -1,41 +1,9 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>ContactCreator - Intake</title>
-</head>
-<body>
-    {% include "_nav.html" %}
-    <h1>Tell ContactCreator about you</h1>
-    <form action="/intake" method="post" enctype="multipart/form-data">
-        <label for="cv_file">CV (.txt or .pdf file):</label><br>
-        <input type="file" id="cv_file" name="cv_file" accept=".txt,.pdf" required><br><br>
-
-        <label for="target_roles">Target roles (comma-separated):</label><br>
-        <input type="text" id="target_roles" name="target_roles" placeholder="Backend Engineer, AI Automation Engineer" required><br><br>
-
-        <label for="target_locations">Target locations:</label><br>
-        <input type="text" id="target_locations" name="target_locations" placeholder="Yerevan, EU remote" required><br><br>
-
-        <label for="domains">Domain expertise:</label><br>
-        <input type="text" id="domains" name="domains" placeholder="banking, call-center" required><br><br>
-
-        <label for="seniority">Seniority:</label><br>
-        <select id="seniority" name="seniority">
-            <option value="junior">Junior</option>
-            <option value="mid" selected>Mid</option>
-            <option value="senior">Senior</option>
-            <option value="lead">Lead</option>
-        </select><br><br>
-
-        <label for="tone">Outreach tone:</label><br>
-        <select id="tone" name="tone">
-            <option value="formal">Formal</option>
-            <option value="professional" selected>Professional</option>
-            <option value="casual">Casual</option>
-        </select><br><br>
-
-        <button type="submit">Save profile</button>
-    </form>
-</body>
-</html>
+{% extends 'base.html' %}
+{% block title %}My profile{% endblock %}{% block breadcrumb %}My profile{% endblock %}
+{% block content %}
+<div class="page-heading"><div><div class="eyebrow">YOUR STORY, WELL TOLD</div><h1>Make it personal<span class="green">.</span></h1><p>A little about you. A better introduction to everyone else.</p></div>{% if profile %}<span class="badge green-badge">{{ icon('check',14) }} Profile ready</span>{% endif %}</div>
+<div class="profile-layout"><form action="/intake" method="post" enctype="multipart/form-data" class="panel profile-form" data-async data-loading="Reading your CV…">
+<section class="form-section"><div class="section-number">01</div><div class="form-section-content"><h2>Your experience</h2><p class="muted">We’ll use your CV to bring the right details into your outreach.</p><label class="upload-zone" for="cv_file"><span class="upload-icon">{{ icon('upload',24) }}</span><strong id="upload-label">Choose a CV to upload</strong><span>PDF or plain text</span><input type="file" id="cv_file" name="cv_file" accept=".txt,.pdf" required></label>{% if profile %}<p class="field-help">Your profile is saved. Upload your CV again to refresh your background and preferences.</p>{% endif %}</div></section>
+<section class="form-section"><div class="section-number">02</div><div class="form-section-content"><h2>Where you want to go</h2><p class="muted">Give your next chapter a little direction.</p><div class="field"><label for="target_roles">Target roles</label><input type="text" id="target_roles" name="target_roles" value="{{ values.get('target_roles', '') }}" placeholder="Backend Engineer, AI Automation Engineer" required><span class="field-help">Separate multiple roles with commas.</span></div><div class="field"><label for="target_locations">Preferred locations</label><input type="text" id="target_locations" name="target_locations" value="{{ values.get('target_locations', '') }}" placeholder="Yerevan, EU remote" required></div><div class="field"><label for="domains">Domain expertise</label><input type="text" id="domains" name="domains" value="{{ values.get('domains', '') }}" placeholder="Banking, fintech, customer experience" required></div><div class="field-row"><div class="field"><label for="seniority">Experience level</label><select id="seniority" name="seniority">{% for value, label in [('junior','Junior'), ('mid','Mid-level'), ('senior','Senior'), ('lead','Lead')] %}<option value="{{ value }}" {{ 'selected' if values.get('seniority', 'mid') == value else '' }}>{{ label }}</option>{% endfor %}</select></div><div class="field"><label for="tone">Your writing style</label><select id="tone" name="tone">{% for value in ['formal', 'professional', 'casual'] %}<option value="{{ value }}" {{ 'selected' if values.get('tone', 'professional') == value else '' }}>{{ value|capitalize }}</option>{% endfor %}</select></div></div></div></section><div class="form-bottom"><span>{{ icon('check',15) }} You review every message before sending.</span><button class="button primary" type="submit">Save profile {{ icon('arrow',16) }}</button></div></form>
+<aside class="profile-aside"><div class="profile-preview"><span class="eyebrow">YOUR INTRODUCTION STARTS HERE</span><div class="profile-avatar">A<span>{{ icon('spark',18) }}</span></div><h2>Ali</h2><p>A story worth sharing.</p><div class="profile-divider"></div><span class="small-label">EMAIL SIGN-OFF</span><p class="signature">Best,<br><strong>Ali</strong></p><span class="badge green-badge">{{ icon('check',13) }} Personal by default</span></div><div class="profile-tip">{{ icon('spark',20) }}<h3>Specific beats generic.</h3><p>The more context you share, the more your messages will sound like you—and give someone a reason to reply.</p></div></aside></div>
+{% endblock %}
