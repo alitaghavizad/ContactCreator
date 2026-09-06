@@ -1,9 +1,10 @@
+import io
 import json
 from unittest.mock import MagicMock
 
 import pytest
 
-from app.cv_parser import CVParseError, StructuredProfile, parse_cv
+from app.cv_parser import CVExtractionError, CVParseError, StructuredProfile, extract_pdf_text, parse_cv
 
 
 def _text_block(text: str):
@@ -161,3 +162,72 @@ def test_parse_cv_requests_headroom_max_tokens():
 
     _, kwargs = mock_client.messages.create.call_args
     assert kwargs["max_tokens"] == 2048
+
+
+def test_extract_pdf_text_concatenates_pages(monkeypatch):
+    from unittest.mock import MagicMock
+
+    import app.cv_parser as cv_parser_module
+
+    page1 = MagicMock()
+    page1.extract_text.return_value = "Page one text."
+    page2 = MagicMock()
+    page2.extract_text.return_value = "Page two text."
+    mock_reader = MagicMock()
+    mock_reader.pages = [page1, page2]
+
+    monkeypatch.setattr(
+        cv_parser_module, "PdfReader", lambda _stream: mock_reader
+    )
+
+    result = extract_pdf_text(b"fake pdf bytes")
+
+    assert result == "Page one text.\nPage two text."
+
+
+def test_extract_pdf_text_skips_pages_with_no_text(monkeypatch):
+    from unittest.mock import MagicMock
+
+    import app.cv_parser as cv_parser_module
+
+    page_with_text = MagicMock()
+    page_with_text.extract_text.return_value = "Some text."
+    page_without_text = MagicMock()
+    page_without_text.extract_text.return_value = None
+    mock_reader = MagicMock()
+    mock_reader.pages = [page_without_text, page_with_text]
+
+    monkeypatch.setattr(
+        cv_parser_module, "PdfReader", lambda _stream: mock_reader
+    )
+
+    result = extract_pdf_text(b"fake pdf bytes")
+
+    assert result == "Some text."
+
+
+def test_extract_pdf_text_raises_when_no_text_on_any_page(monkeypatch):
+    from unittest.mock import MagicMock
+
+    import app.cv_parser as cv_parser_module
+
+    page = MagicMock()
+    page.extract_text.return_value = ""
+    mock_reader = MagicMock()
+    mock_reader.pages = [page]
+
+    monkeypatch.setattr(
+        cv_parser_module, "PdfReader", lambda _stream: mock_reader
+    )
+
+    with pytest.raises(CVExtractionError) as exc_info:
+        extract_pdf_text(b"fake pdf bytes")
+
+    assert "no text" in str(exc_info.value).lower()
+
+
+def test_extract_pdf_text_raises_on_corrupt_pdf():
+    with pytest.raises(CVExtractionError) as exc_info:
+        extract_pdf_text(b"%PDF-1.4 not a real pdf")
+
+    assert "could not read" in str(exc_info.value).lower()

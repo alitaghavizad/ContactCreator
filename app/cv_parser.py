@@ -1,12 +1,38 @@
+import io
 import json
 from dataclasses import dataclass, field
 
 import anthropic
+from pypdf import PdfReader
+from pypdf.errors import PdfReadError
 
 
 class CVParseError(Exception):
     """Raised when Claude's response cannot be parsed as valid JSON."""
     pass
+
+
+class CVExtractionError(Exception):
+    """Raised when text cannot be extracted from an uploaded CV file."""
+    pass
+
+
+def extract_pdf_text(pdf_bytes: bytes) -> str:
+    try:
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        page_texts = [page.extract_text() for page in reader.pages]
+    except PdfReadError as e:
+        raise CVExtractionError(
+            "Could not read this PDF - it may be corrupted. Try exporting as .txt instead."
+        ) from e
+
+    text = "\n".join(t for t in page_texts if t)
+    if not text.strip():
+        raise CVExtractionError(
+            "Could not extract any text from this PDF - it may be a scanned image with "
+            "no text layer. Try exporting as .txt instead."
+        )
+    return text
 
 CV_PARSE_SYSTEM_PROMPT = """You are a resume-parsing assistant. Read the candidate's CV \
 and the answers they gave to a short intake questionnaire, then return ONLY a JSON object \
