@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 
 import anthropic
 from pypdf import PdfReader
-from pypdf.errors import PyPdfError
 
 
 class CVParseError(Exception):
@@ -21,7 +20,13 @@ def extract_pdf_text(pdf_bytes: bytes) -> str:
     try:
         reader = PdfReader(io.BytesIO(pdf_bytes))
         page_texts = [page.extract_text() for page in reader.pages]
-    except PyPdfError as e:
+    except Exception as e:
+        # Broad catch is intentional and scoped to this one function: pypdf can raise
+        # all sorts of things here that aren't PyPdfError subclasses (e.g.
+        # pypdf.errors.DependencyError for AES-encrypted PDFs when `cryptography` isn't
+        # installed, or raw KeyError/struct.error/zlib.error from corrupt/hostile input
+        # during page extraction). Every failure at this boundary means the same thing
+        # to the caller: "could not read this PDF".
         raise CVExtractionError(
             "Could not read this PDF - it may be corrupted. Try exporting as .txt instead."
         ) from e

@@ -254,6 +254,25 @@ def test_extract_pdf_text_raises_on_parse_error(monkeypatch):
     assert "could not read" in str(exc_info.value).lower()
 
 
+def test_extract_pdf_text_raises_on_dependency_error(monkeypatch):
+    from unittest.mock import MagicMock
+
+    import app.cv_parser as cv_parser_module
+    from pypdf.errors import DependencyError
+
+    def mock_pdf_reader_raises_dependency_error(_stream):
+        raise DependencyError("cryptography>=3.1 is required for AES algorithm")
+
+    monkeypatch.setattr(
+        cv_parser_module, "PdfReader", mock_pdf_reader_raises_dependency_error
+    )
+
+    with pytest.raises(CVExtractionError) as exc_info:
+        extract_pdf_text(b"fake pdf bytes")
+
+    assert "could not read" in str(exc_info.value).lower()
+
+
 def test_parse_cv_raises_cvparse_error_on_anthropic_api_error():
     request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
     mock_client = MagicMock()

@@ -42,7 +42,7 @@ Auditing the current code turned up two concrete, previously-unhandled failure m
 
 ### Error handling — Hunter API failures
 
-**`app/hunter_client.py` (modified):** new `HunterAPIError(Exception)`. `domain_search` wraps its HTTP call and `raise_for_status()` in `try/except httpx.HTTPStatusError as e: raise HunterAPIError(f"Hunter.io returned an error: {e}") from e` and `except httpx.RequestError as e: raise HunterAPIError(f"Could not reach Hunter.io: {e}") from e`.
+**`app/hunter_client.py` (modified):** new `HunterAPIError(Exception)`. `domain_search` wraps its HTTP call and `raise_for_status()` in `try/except httpx.HTTPStatusError as e: raise HunterAPIError(f"Hunter.io returned an error: {e.response.status_code} {e.response.reason_phrase}") from e` (not `{e}` directly — `httpx.HTTPStatusError`'s default message embeds the full request URL, including the `api_key` query param) and `except httpx.RequestError as e: raise HunterAPIError(f"Could not reach Hunter.io: {e}") from e`.
 
 **`app/routes/discovery.py` (modified):** `discover_contacts` wraps the `hunter_client.domain_search(...)` call in `try/except HunterAPIError as e: raise HTTPException(status_code=502, detail=str(e))` — same 502-on-external-failure pattern already used by `intake.py` and `outreach.py`.
 

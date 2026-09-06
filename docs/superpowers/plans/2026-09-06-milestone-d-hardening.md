@@ -840,7 +840,11 @@ with:
             )
             response.raise_for_status()
         except httpx.HTTPStatusError as e:
-            raise HunterAPIError(f"Hunter.io returned an error: {e}") from e
+            # not `{e}` directly — `httpx.HTTPStatusError`'s default message embeds the
+            # full request URL, including the `api_key` query param
+            raise HunterAPIError(
+                f"Hunter.io returned an error: {e.response.status_code} {e.response.reason_phrase}"
+            ) from e
         except httpx.RequestError as e:
             raise HunterAPIError(f"Could not reach Hunter.io: {e}") from e
         data = response.json()

@@ -85,5 +85,19 @@ def test_domain_search_raises_hunter_api_error_on_request_error():
     mock_http.get.side_effect = httpx.ConnectError("connection refused")
     client = HunterClient(api_key="test-key", http_client=mock_http)
 
+    with pytest.raises(HunterAPIError) as exc_info:
+        client.domain_search("example.com")
+
+    # Verify API key does not leak into error message (httpx.RequestError.__str__
+    # doesn't embed the URL, but this makes the invariant explicit and regression-proof).
+    assert "test-key" not in str(exc_info.value)
+
+
+def test_domain_search_raises_hunter_api_error_on_malformed_json_response():
+    request = httpx.Request("GET", "https://api.hunter.io/v2/domain-search")
+    mock_http = MagicMock()
+    mock_http.get.return_value = httpx.Response(200, content=b"not json", request=request)
+    client = HunterClient(api_key="test-key", http_client=mock_http)
+
     with pytest.raises(HunterAPIError):
         client.domain_search("example.com")

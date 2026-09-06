@@ -38,13 +38,16 @@ class HunterClient:
                 },
             )
             response.raise_for_status()
+            data = response.json()
         except httpx.HTTPStatusError as e:
+            # str(e) would embed the full request URL, including api_key as a query param — never interpolate the raw exception here.
             raise HunterAPIError(
                 f"Hunter.io returned an error: {e.response.status_code} {e.response.reason_phrase}"
             ) from e
         except httpx.RequestError as e:
             raise HunterAPIError(f"Could not reach Hunter.io: {e}") from e
-        data = response.json()
+        except ValueError as e:
+            raise HunterAPIError("Hunter.io returned a malformed response") from e
         result = data.get("data") or {}
         company_name = result.get("organization")
         emails = result.get("emails") or []
