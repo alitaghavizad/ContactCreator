@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock
 
+import httpx
+import anthropic
 import pytest
 
 from app.drafting import (
@@ -256,6 +258,54 @@ def test_draft_email_subject_skips_non_text_content_blocks():
 
 def test_draft_email_subject_raises_on_empty_content():
     mock_client = _mock_client_with_blocks([])
+
+    with pytest.raises(DraftingError):
+        draft_email_subject(
+            profile_summary="summary",
+            contact_name="Jane",
+            contact_title="Manager",
+            company_name="Example Bank",
+            client=mock_client,
+            model="claude-sonnet-5",
+        )
+
+
+def test_draft_linkedin_note_raises_drafting_error_on_anthropic_api_error():
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    mock_client = MagicMock()
+    mock_client.messages.create.side_effect = anthropic.APIConnectionError(request=request)
+
+    with pytest.raises(DraftingError):
+        draft_linkedin_note(
+            profile_summary="summary",
+            contact_name="Jane",
+            contact_title="Manager",
+            company_name="Example Bank",
+            client=mock_client,
+            model="claude-sonnet-5",
+        )
+
+
+def test_draft_email_raises_drafting_error_on_anthropic_api_error():
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    mock_client = MagicMock()
+    mock_client.messages.create.side_effect = anthropic.APIConnectionError(request=request)
+
+    with pytest.raises(DraftingError):
+        draft_email(
+            profile_summary="summary",
+            contact_name="Jane",
+            contact_title="Manager",
+            company_name="Example Bank",
+            client=mock_client,
+            model="claude-sonnet-5",
+        )
+
+
+def test_draft_email_subject_raises_drafting_error_on_anthropic_api_error():
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    mock_client = MagicMock()
+    mock_client.messages.create.side_effect = anthropic.APIConnectionError(request=request)
 
     with pytest.raises(DraftingError):
         draft_email_subject(

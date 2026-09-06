@@ -2,6 +2,8 @@ import io
 import json
 from unittest.mock import MagicMock
 
+import httpx
+import anthropic
 import pytest
 
 from app.cv_parser import CVExtractionError, CVParseError, StructuredProfile, extract_pdf_text, parse_cv
@@ -250,3 +252,17 @@ def test_extract_pdf_text_raises_on_parse_error(monkeypatch):
         extract_pdf_text(b"fake pdf bytes")
 
     assert "could not read" in str(exc_info.value).lower()
+
+
+def test_parse_cv_raises_cvparse_error_on_anthropic_api_error():
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    mock_client = MagicMock()
+    mock_client.messages.create.side_effect = anthropic.APIConnectionError(request=request)
+
+    with pytest.raises(CVParseError):
+        parse_cv(
+            cv_text="5 years Java developer...",
+            questionnaire_answers="",
+            client=mock_client,
+            model="claude-sonnet-5",
+        )

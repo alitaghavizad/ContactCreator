@@ -49,20 +49,23 @@ def draft_linkedin_note(
     model: str,
 ) -> str:
     system = LINKEDIN_SYSTEM_PROMPT.format(limit=LINKEDIN_CHAR_LIMIT)
-    message = client.messages.create(
-        model=model,
-        max_tokens=500,
-        system=system,
-        messages=[
-            {
-                "role": "user",
-                "content": (
-                    f"Candidate background:\n{profile_summary}\n\n"
-                    f"Recipient: {contact_name}, {contact_title} at {company_name}"
-                ),
-            }
-        ],
-    )
+    try:
+        message = client.messages.create(
+            model=model,
+            max_tokens=500,
+            system=system,
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        f"Candidate background:\n{profile_summary}\n\n"
+                        f"Recipient: {contact_name}, {contact_title} at {company_name}"
+                    ),
+                }
+            ],
+        )
+    except anthropic.APIError as e:
+        raise DraftingError(f"Claude API request failed: {e}") from e
     if not message.content:
         raise DraftingError("Claude returned an empty response with no content blocks")
     note = _first_text_block(message).strip()
@@ -77,20 +80,23 @@ def draft_email(
     client: anthropic.Anthropic,
     model: str,
 ) -> str:
-    message = client.messages.create(
-        model=model,
-        max_tokens=1200,
-        system=EMAIL_SYSTEM_PROMPT,
-        messages=[
-            {
-                "role": "user",
-                "content": (
-                    f"Candidate background:\n{profile_summary}\n\n"
-                    f"Recipient: {contact_name}, {contact_title} at {company_name}"
-                ),
-            }
-        ],
-    )
+    try:
+        message = client.messages.create(
+            model=model,
+            max_tokens=1200,
+            system=EMAIL_SYSTEM_PROMPT,
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        f"Candidate background:\n{profile_summary}\n\n"
+                        f"Recipient: {contact_name}, {contact_title} at {company_name}"
+                    ),
+                }
+            ],
+        )
+    except anthropic.APIError as e:
+        raise DraftingError(f"Claude API request failed: {e}") from e
     if not message.content:
         raise DraftingError("Claude returned an empty response with no content blocks")
     return _first_text_block(message).strip()
@@ -104,20 +110,23 @@ def draft_email_subject(
     client: anthropic.Anthropic,
     model: str,
 ) -> str:
-    message = client.messages.create(
-        model=model,
-        max_tokens=200,
-        system=EMAIL_SUBJECT_SYSTEM_PROMPT,
-        messages=[
-            {
-                "role": "user",
-                "content": (
-                    f"Candidate background:\n{profile_summary}\n\n"
-                    f"Recipient: {contact_name}, {contact_title} at {company_name}"
-                ),
-            }
-        ],
-    )
+    try:
+        message = client.messages.create(
+            model=model,
+            max_tokens=200,
+            system=EMAIL_SUBJECT_SYSTEM_PROMPT,
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        f"Candidate background:\n{profile_summary}\n\n"
+                        f"Recipient: {contact_name}, {contact_title} at {company_name}"
+                    ),
+                }
+            ],
+        )
+    except anthropic.APIError as e:
+        raise DraftingError(f"Claude API request failed: {e}") from e
     if not message.content:
         raise DraftingError("Claude returned an empty response with no content blocks")
     return _first_text_block(message).strip()

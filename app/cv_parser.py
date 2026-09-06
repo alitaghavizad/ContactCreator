@@ -77,20 +77,23 @@ def parse_cv(
     client: anthropic.Anthropic,
     model: str,
 ) -> StructuredProfile:
-    message = client.messages.create(
-        model=model,
-        max_tokens=2048,
-        system=CV_PARSE_SYSTEM_PROMPT,
-        messages=[
-            {
-                "role": "user",
-                "content": (
-                    f"CV:\n{cv_text}\n\n"
-                    f"Questionnaire answers:\n{questionnaire_answers}"
-                ),
-            }
-        ],
-    )
+    try:
+        message = client.messages.create(
+            model=model,
+            max_tokens=2048,
+            system=CV_PARSE_SYSTEM_PROMPT,
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        f"CV:\n{cv_text}\n\n"
+                        f"Questionnaire answers:\n{questionnaire_answers}"
+                    ),
+                }
+            ],
+        )
+    except anthropic.APIError as e:
+        raise CVParseError(f"Claude API request failed: {e}") from e
     raw_text = _first_text_block(message)
     try:
         data = json.loads(raw_text)
