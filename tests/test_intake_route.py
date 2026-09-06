@@ -50,8 +50,8 @@ def test_submit_intake_creates_profile(mock_anthropic_cls, client):
     assert response.headers["location"] == "/contacts"
 
 
-def test_submit_intake_rejects_non_txt_file(client):
-    cv_file = io.BytesIO(b"%PDF-1.4 fake pdf content")
+def test_submit_intake_rejects_unsupported_file_extension(client):
+    cv_file = io.BytesIO(b"some binary content")
 
     response = client.post(
         "/intake",
@@ -61,10 +61,12 @@ def test_submit_intake_rejects_non_txt_file(client):
             "domains": "banking",
             "seniority": "mid",
         },
-        files={"cv_file": ("cv.pdf", cv_file, "application/pdf")},
+        files={"cv_file": ("cv.docx", cv_file, "application/vnd.openxmlformats")},
     )
 
     assert response.status_code == 400
+    assert ".txt" in response.json()["detail"]
+    assert ".pdf" in response.json()["detail"]
 
 
 @patch("app.routes.intake.parse_cv")
@@ -238,3 +240,65 @@ def test_submit_intake_does_not_block_event_loop(mock_parse_cv, client):
     )
     assert intake_response.status_code == 303
     assert intake_response.headers["location"] == "/contacts"
+
+
+@patch("app.routes.intake.extract_pdf_text")
+@patch("app.routes.intake.anthropic.Anthropic")
+def test_submit_intake_accepts_pdf_file(mock_anthropic_cls, mock_extract_pdf_text, client):
+    mock_extract_pdf_text.return_value = "5 years Java developer with banking domain experience."
+    _mock_claude_response(
+        mock_anthropic_cls,
+        '{"skills": ["Java"], "years_experience": 5, "domains": ["banking"], '
+        '"target_roles": ["Backend Engineer"], "target_locations": ["Yerevan"], '
+        '"seniority": "mid", "tone": "professional"}',
+    )
+
+    cv_file = io.BytesIO(b"%PDF-1.4 fake but well-formed-enough pdf bytes")
+
+    response = client.post(
+        "/intake",
+        data={
+            "target_roles": "Backend Engineer",
+            "target_locations": "Yerevan",
+            "domains": "banking",
+            "seniority": "mid",
+        },
+        files={"cv_file": ("cv.pdf", cv_file, "application/pdf")},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    mock_extract_pdf_text.assert_called_once()
+
+    db = SessionLocal()
+    try:
+        profile = db.query(Profile).first()
+        assert profile.cv_text == "5 years Java developer with banking domain experience."
+    finally:
+        db.close()
+
+
+@patch("app.routes.intake.extract_pdf_text")
+def test_submit_intake_handles_unreadable_pdf(mock_extract_pdf_text, client):
+    from app.cv_parser import CVExtractionError
+
+    mock_extract_pdf_text.side_effect = CVExtractionError(
+        "Could not extract any text from this PDF."
+    )
+
+    cv_file = io.BytesIO(b"%PDF-1.4 scanned image pdf")
+
+    response = client.post(
+        "/intake",
+        data={
+            "target_roles": "Backend Engineer",
+            "target_locations": "Yerevan",
+            "domains": "banking",
+            "seniority": "mid",
+        },
+        files={"cv_file": ("cv.pdf", cv_file, "application/pdf")},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 400
+    assert "Could not extract any text" in response.json()["detail"]

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from app.config import settings
-from app.cv_parser import CVParseError, parse_cv
+from app.cv_parser import CVExtractionError, CVParseError, extract_pdf_text, parse_cv
 from app.db import get_db
 from app.models import Profile, User
 
@@ -41,13 +41,21 @@ async def submit_intake(
     tone: str = Form("professional"),
     db: Session = Depends(get_db),
 ):
-    if not cv_file.filename.lower().endswith(".txt"):
+    filename = cv_file.filename.lower()
+    if not (filename.endswith(".txt") or filename.endswith(".pdf")):
         raise HTTPException(
-            status_code=400, detail="Please upload a plain text (.txt) CV file for now."
+            status_code=400,
+            detail="Please upload a plain text (.txt) or PDF (.pdf) CV file.",
         )
 
     cv_bytes = await cv_file.read()
-    cv_text = cv_bytes.decode("utf-8", errors="ignore")
+    if filename.endswith(".pdf"):
+        try:
+            cv_text = extract_pdf_text(cv_bytes)
+        except CVExtractionError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    else:
+        cv_text = cv_bytes.decode("utf-8", errors="ignore")
 
     questionnaire_answers = (
         f"Target roles: {target_roles}\n"
